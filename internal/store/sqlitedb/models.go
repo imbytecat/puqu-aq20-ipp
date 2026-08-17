@@ -21,21 +21,27 @@ type Device struct {
 }
 
 type LabelProfile struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	WidthUm   int64  `json:"width_um"`
-	HeightUm  int64  `json:"height_um"`
-	GapUm     int64  `json:"gap_um"`
-	PaperType int64  `json:"paper_type"`
-	Darkness  int64  `json:"darkness"`
-	Speed     int64  `json:"speed"`
-	CreatedAt int64  `json:"created_at"`
-	UpdatedAt int64  `json:"updated_at"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	WidthUm        int64  `json:"width_um"`
+	HeightUm       int64  `json:"height_um"`
+	GapUm          int64  `json:"gap_um"`
+	CreatedAt      int64  `json:"created_at"`
+	UpdatedAt      int64  `json:"updated_at"`
+	HalftoneMethod int64  `json:"halftone_method"`
+	Brightness     int64  `json:"brightness"`
 }
 
 type LegacyBlePrinterAssignment struct {
 	PrinterID int64 `json:"printer_id"`
 	DeviceID  int64 `json:"device_id"`
+}
+
+type LegacyProfilePrinterSetting struct {
+	ProfileID int64 `json:"profile_id"`
+	PaperType int64 `json:"paper_type"`
+	Darkness  int64 `json:"darkness"`
+	Speed     int64 `json:"speed"`
 }
 
 type PrintJob struct {

@@ -13,7 +13,7 @@ import (
 )
 
 type PrinterFleet interface {
-	Print(context.Context, int64, []printer.Job, printer.Settings) (printer.Result, error)
+	Print(context.Context, int64, []printer.Job) (printer.Result, error)
 	Cancel(int64) error
 	Status(int64) printer.Status
 }
@@ -23,8 +23,8 @@ type fleetPrinter struct {
 	id    int64
 }
 
-func (p fleetPrinter) Print(ctx context.Context, jobs []printer.Job, settings printer.Settings) (printer.Result, error) {
-	return p.fleet.Print(ctx, p.id, jobs, settings)
+func (p fleetPrinter) Print(ctx context.Context, jobs []printer.Job) (printer.Result, error) {
+	return p.fleet.Print(ctx, p.id, jobs)
 }
 func (p fleetPrinter) Cancel() error          { return p.fleet.Cancel(p.id) }
 func (p fleetPrinter) Status() printer.Status { return p.fleet.Status(p.id) }

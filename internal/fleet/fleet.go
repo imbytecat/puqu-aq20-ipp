@@ -146,12 +146,12 @@ func (f *Fleet) Reconnect(id int64) error {
 	return nil
 }
 
-func (f *Fleet) Print(ctx context.Context, id int64, jobs []printer.Job, settings printer.Settings) (printer.Result, error) {
+func (f *Fleet) Print(ctx context.Context, id int64, jobs []printer.Job) (printer.Result, error) {
 	r, err := f.runtime(id)
 	if err != nil {
 		return printer.Result{}, err
 	}
-	return r.manager.Print(ctx, jobs, settings)
+	return r.manager.Print(ctx, jobs)
 }
 
 func (f *Fleet) Cancel(id int64) error {

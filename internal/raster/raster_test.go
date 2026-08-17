@@ -51,6 +51,33 @@ func TestDecodeJPEG(t *testing.T) {
 	}
 }
 
+func TestOfficialBrightnessScale(t *testing.T) {
+	values := []byte{120, 135}
+	if got := halftoneBitmap(values, 2, 1, HalftoneDirect, 0); !bytes.Equal(got, []byte{0x80}) {
+		t.Fatalf("neutral bitmap = % x, want 80", got)
+	}
+	if got := halftoneBitmap(values, 2, 1, HalftoneDirect, 1); !bytes.Equal(got, []byte{0x00}) {
+		t.Fatalf("brighter bitmap = % x, want 00", got)
+	}
+}
+
+func TestOfficialClusteredMatrix(t *testing.T) {
+	values := bytes.Repeat([]byte{100}, 16)
+	got := halftoneBitmap(values, 4, 4, HalftoneClustered, 0)
+	if want := []byte{0x50, 0xb0, 0x50, 0xe0}; !bytes.Equal(got, want) {
+		t.Fatalf("bitmap = % x, want % x", got, want)
+	}
+}
+
+func TestOfficialErrorDiffusionModes(t *testing.T) {
+	values := []byte{0, 255}
+	for _, method := range []int{HalftoneAuto, HalftoneErrorDiffusion} {
+		if got := halftoneBitmap(values, 2, 1, method, 0); !bytes.Equal(got, []byte{0x80}) {
+			t.Fatalf("method %d bitmap = % x, want 80", method, got)
+		}
+	}
+}
+
 func TestCUPSReferenceCompressionExample(t *testing.T) {
 	// First compressed row from the CUPS Raster Format specification Figure 3:
 	// one white RGB value, three yellow values, four white values.

@@ -18,7 +18,7 @@ A configured logical IPP queue with a stable path and UUID. Each printer selects
 
 ## Label profile
 
-Reusable label stock dimensions and device tuning. A printer selects one profile; a profile may be shared by multiple printers.
+Reusable label stock dimensions and optional host-side raster tuning. A printer selects one profile; a profile may be shared by multiple printers.
 
 ## Job
 

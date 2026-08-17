@@ -252,9 +252,7 @@ func (s *Server) testPrint(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	result, err := s.fleet.Print(ctx, id, []printer.Job{job}, printer.Settings{
-		Darkness: int(profile.Darkness), Speed: int(profile.Speed), PaperType: int(profile.PaperType),
-	})
+	result, err := s.fleet.Print(ctx, id, []printer.Job{job})
 	if err != nil {
 		writeError(w, http.StatusConflict, err.Error())
 		return
@@ -272,19 +270,18 @@ func (s *Server) profiles(w http.ResponseWriter, r *http.Request) {
 }
 
 type profileInput struct {
-	Name      string  `json:"name"`
-	WidthMM   float64 `json:"widthMm"`
-	HeightMM  float64 `json:"heightMm"`
-	GapMM     float64 `json:"gapMm"`
-	PaperType int64   `json:"paperType"`
-	Darkness  int64   `json:"darkness"`
-	Speed     int64   `json:"speed"`
+	Name           string  `json:"name"`
+	WidthMM        float64 `json:"widthMm"`
+	HeightMM       float64 `json:"heightMm"`
+	GapMM          float64 `json:"gapMm"`
+	HalftoneMethod int64   `json:"halftoneMethod"`
+	Brightness     int64   `json:"brightness"`
 }
 
 func (input profileInput) storeInput() store.ProfileInput {
 	return store.ProfileInput{
 		Name: input.Name, WidthUM: int64(input.WidthMM * 1000), HeightUM: int64(input.HeightMM * 1000),
-		GapUM: int64(input.GapMM * 1000), PaperType: input.PaperType, Darkness: input.Darkness, Speed: input.Speed,
+		GapUM: int64(input.GapMM * 1000), HalftoneMethod: input.HalftoneMethod, Brightness: input.Brightness,
 	}
 }
 
@@ -449,14 +446,13 @@ type deviceDTO struct {
 }
 
 type profileDTO struct {
-	ID        int64   `json:"id"`
-	Name      string  `json:"name"`
-	WidthMM   float64 `json:"widthMm"`
-	HeightMM  float64 `json:"heightMm"`
-	GapMM     float64 `json:"gapMm"`
-	PaperType int64   `json:"paperType"`
-	Darkness  int64   `json:"darkness"`
-	Speed     int64   `json:"speed"`
+	ID             int64   `json:"id"`
+	Name           string  `json:"name"`
+	WidthMM        float64 `json:"widthMm"`
+	HeightMM       float64 `json:"heightMm"`
+	GapMM          float64 `json:"gapMm"`
+	HalftoneMethod int64   `json:"halftoneMethod"`
+	Brightness     int64   `json:"brightness"`
 }
 
 type jobDTO struct {
@@ -527,7 +523,7 @@ func toProfile(value *store.Profile) profileDTO {
 	return profileDTO{
 		ID: value.ID, Name: value.Name, WidthMM: float64(value.WidthUm) / 1000,
 		HeightMM: float64(value.HeightUm) / 1000, GapMM: float64(value.GapUm) / 1000,
-		PaperType: value.PaperType, Darkness: value.Darkness, Speed: value.Speed,
+		HalftoneMethod: value.HalftoneMethod, Brightness: value.Brightness,
 	}
 }
 

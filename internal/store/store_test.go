@@ -145,6 +145,45 @@ func TestUSBMigrationClearsBluetoothAssignmentAndRestoresItOnRollback(t *testing
 	}
 }
 
+func TestOfficialRasterSettingsMigrationRestoresLegacyValues(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite3", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "puqu.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, "migrations", 4); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE label_profiles SET paper_type = 3, darkness = 11, speed = 5"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, "migrations", 5); err != nil {
+		t.Fatal(err)
+	}
+	var halftone, brightness int64
+	if err := db.QueryRowContext(ctx, "SELECT halftone_method, brightness FROM label_profiles LIMIT 1").Scan(&halftone, &brightness); err != nil {
+		t.Fatal(err)
+	}
+	if halftone != 0 || brightness != 0 {
+		t.Fatalf("official defaults = %d/%d, want 0/0", halftone, brightness)
+	}
+	if err := goose.DownTo(db, "migrations", 4); err != nil {
+		t.Fatal(err)
+	}
+	var paperType, darkness, speed int64
+	if err := db.QueryRowContext(ctx, "SELECT paper_type, darkness, speed FROM label_profiles LIMIT 1").Scan(&paperType, &darkness, &speed); err != nil {
+		t.Fatal(err)
+	}
+	if paperType != 3 || darkness != 11 || speed != 5 {
+		t.Fatalf("restored settings = %d/%d/%d", paperType, darkness, speed)
+	}
+}
+
 func TestStoreSupportsSharedProfilesAndExclusiveDevices(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, filepath.Join(t.TempDir(), "puqu.db"))
@@ -153,7 +192,7 @@ func TestStoreSupportsSharedProfilesAndExclusiveDevices(t *testing.T) {
 	}
 	defer s.Close()
 	profile, err := s.CreateProfile(ctx, ProfileInput{
-		Name: "40 x 20", WidthUM: 40000, HeightUM: 20000, GapUM: 2000, PaperType: 2, Darkness: 7, Speed: 3,
+		Name: "40 x 20", WidthUM: 40000, HeightUM: 20000, GapUM: 2000, HalftoneMethod: 1, Brightness: 2,
 	})
 	if err != nil {
 		t.Fatal(err)

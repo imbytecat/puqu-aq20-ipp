@@ -11,21 +11,20 @@ import (
 
 const createProfile = `-- name: CreateProfile :one
 INSERT INTO label_profiles (
-    name, width_um, height_um, gap_um, paper_type, darkness, speed, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, name, width_um, height_um, gap_um, paper_type, darkness, speed, created_at, updated_at
+    name, width_um, height_um, gap_um, halftone_method, brightness, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, name, width_um, height_um, gap_um, created_at, updated_at, halftone_method, brightness
 `
 
 type CreateProfileParams struct {
-	Name      string `json:"name"`
-	WidthUm   int64  `json:"width_um"`
-	HeightUm  int64  `json:"height_um"`
-	GapUm     int64  `json:"gap_um"`
-	PaperType int64  `json:"paper_type"`
-	Darkness  int64  `json:"darkness"`
-	Speed     int64  `json:"speed"`
-	CreatedAt int64  `json:"created_at"`
-	UpdatedAt int64  `json:"updated_at"`
+	Name           string `json:"name"`
+	WidthUm        int64  `json:"width_um"`
+	HeightUm       int64  `json:"height_um"`
+	GapUm          int64  `json:"gap_um"`
+	HalftoneMethod int64  `json:"halftone_method"`
+	Brightness     int64  `json:"brightness"`
+	CreatedAt      int64  `json:"created_at"`
+	UpdatedAt      int64  `json:"updated_at"`
 }
 
 func (q *Queries) CreateProfile(ctx context.Context, arg CreateProfileParams) (*LabelProfile, error) {
@@ -34,9 +33,8 @@ func (q *Queries) CreateProfile(ctx context.Context, arg CreateProfileParams) (*
 		arg.WidthUm,
 		arg.HeightUm,
 		arg.GapUm,
-		arg.PaperType,
-		arg.Darkness,
-		arg.Speed,
+		arg.HalftoneMethod,
+		arg.Brightness,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -47,11 +45,10 @@ func (q *Queries) CreateProfile(ctx context.Context, arg CreateProfileParams) (*
 		&i.WidthUm,
 		&i.HeightUm,
 		&i.GapUm,
-		&i.PaperType,
-		&i.Darkness,
-		&i.Speed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HalftoneMethod,
+		&i.Brightness,
 	)
 	return &i, err
 }
@@ -69,7 +66,7 @@ func (q *Queries) DeleteProfile(ctx context.Context, id int64) (int64, error) {
 }
 
 const getProfile = `-- name: GetProfile :one
-SELECT id, name, width_um, height_um, gap_um, paper_type, darkness, speed, created_at, updated_at FROM label_profiles WHERE id = ?
+SELECT id, name, width_um, height_um, gap_um, created_at, updated_at, halftone_method, brightness FROM label_profiles WHERE id = ?
 `
 
 func (q *Queries) GetProfile(ctx context.Context, id int64) (*LabelProfile, error) {
@@ -81,17 +78,16 @@ func (q *Queries) GetProfile(ctx context.Context, id int64) (*LabelProfile, erro
 		&i.WidthUm,
 		&i.HeightUm,
 		&i.GapUm,
-		&i.PaperType,
-		&i.Darkness,
-		&i.Speed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HalftoneMethod,
+		&i.Brightness,
 	)
 	return &i, err
 }
 
 const listProfiles = `-- name: ListProfiles :many
-SELECT id, name, width_um, height_um, gap_um, paper_type, darkness, speed, created_at, updated_at FROM label_profiles ORDER BY name ASC, id ASC
+SELECT id, name, width_um, height_um, gap_um, created_at, updated_at, halftone_method, brightness FROM label_profiles ORDER BY name ASC, id ASC
 `
 
 func (q *Queries) ListProfiles(ctx context.Context) ([]*LabelProfile, error) {
@@ -109,11 +105,10 @@ func (q *Queries) ListProfiles(ctx context.Context) ([]*LabelProfile, error) {
 			&i.WidthUm,
 			&i.HeightUm,
 			&i.GapUm,
-			&i.PaperType,
-			&i.Darkness,
-			&i.Speed,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.HalftoneMethod,
+			&i.Brightness,
 		); err != nil {
 			return nil, err
 		}
@@ -130,21 +125,20 @@ func (q *Queries) ListProfiles(ctx context.Context) ([]*LabelProfile, error) {
 
 const updateProfile = `-- name: UpdateProfile :one
 UPDATE label_profiles
-SET name = ?, width_um = ?, height_um = ?, gap_um = ?, paper_type = ?, darkness = ?, speed = ?, updated_at = ?
+SET name = ?, width_um = ?, height_um = ?, gap_um = ?, halftone_method = ?, brightness = ?, updated_at = ?
 WHERE id = ?
-RETURNING id, name, width_um, height_um, gap_um, paper_type, darkness, speed, created_at, updated_at
+RETURNING id, name, width_um, height_um, gap_um, created_at, updated_at, halftone_method, brightness
 `
 
 type UpdateProfileParams struct {
-	Name      string `json:"name"`
-	WidthUm   int64  `json:"width_um"`
-	HeightUm  int64  `json:"height_um"`
-	GapUm     int64  `json:"gap_um"`
-	PaperType int64  `json:"paper_type"`
-	Darkness  int64  `json:"darkness"`
-	Speed     int64  `json:"speed"`
-	UpdatedAt int64  `json:"updated_at"`
-	ID        int64  `json:"id"`
+	Name           string `json:"name"`
+	WidthUm        int64  `json:"width_um"`
+	HeightUm       int64  `json:"height_um"`
+	GapUm          int64  `json:"gap_um"`
+	HalftoneMethod int64  `json:"halftone_method"`
+	Brightness     int64  `json:"brightness"`
+	UpdatedAt      int64  `json:"updated_at"`
+	ID             int64  `json:"id"`
 }
 
 func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) (*LabelProfile, error) {
@@ -153,9 +147,8 @@ func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) (*
 		arg.WidthUm,
 		arg.HeightUm,
 		arg.GapUm,
-		arg.PaperType,
-		arg.Darkness,
-		arg.Speed,
+		arg.HalftoneMethod,
+		arg.Brightness,
 		arg.UpdatedAt,
 		arg.ID,
 	)
@@ -166,11 +159,10 @@ func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) (*
 		&i.WidthUm,
 		&i.HeightUm,
 		&i.GapUm,
-		&i.PaperType,
-		&i.Darkness,
-		&i.Speed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.HalftoneMethod,
+		&i.Brightness,
 	)
 	return &i, err
 }

@@ -24,7 +24,7 @@ type fakePrinter struct {
 	jobs []printer.Job
 }
 
-func (f *fakePrinter) Print(_ context.Context, jobs []printer.Job, _ printer.Settings) (printer.Result, error) {
+func (f *fakePrinter) Print(_ context.Context, jobs []printer.Job) (printer.Result, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.jobs = append(f.jobs, jobs...)
@@ -38,7 +38,7 @@ type fakeFleet struct {
 	jobs map[int64][]printer.Job
 }
 
-func (f *fakeFleet) Print(_ context.Context, id int64, jobs []printer.Job, _ printer.Settings) (printer.Result, error) {
+func (f *fakeFleet) Print(_ context.Context, id int64, jobs []printer.Job) (printer.Result, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.jobs[id] = append(f.jobs[id], jobs...)

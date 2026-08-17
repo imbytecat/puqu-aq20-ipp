@@ -25,7 +25,25 @@ const (
 	colorSW       = 18
 	colorSRGB     = 19
 	colorAdobeRGB = 20
+
+	HalftoneAuto           = 0
+	HalftoneDirect         = 1
+	HalftoneClustered      = 2
+	HalftoneErrorDiffusion = 3
 )
+
+var clustered4x4 = [16]byte{
+	0, 136, 34, 170,
+	204, 68, 238, 102,
+	51, 187, 17, 153,
+	255, 119, 221, 85,
+}
+
+var errorDiffusionWeights = [...]struct{ dx, dy, numerator int }{
+	{1, 0, 8}, {2, 0, 4},
+	{-2, 1, 2}, {-1, 1, 4}, {0, 1, 8}, {1, 1, 4}, {2, 1, 2},
+	{-2, 2, 1}, {-1, 2, 2}, {0, 2, 4}, {1, 2, 2}, {2, 2, 1},
+}
 
 var (
 	ErrFormat     = errors.New("unsupported raster format")
@@ -33,8 +51,10 @@ var (
 )
 
 type Profile struct {
-	WidthUM  int64
-	HeightUM int64
+	WidthUM        int64
+	HeightUM       int64
+	HalftoneMethod int64
+	Brightness     int64
 }
 
 type page struct {
@@ -116,25 +136,22 @@ func decodeJPEG(input io.Reader, profile Profile) ([]printer.Job, error) {
 	if config.Width != expectedWidth || config.Height != expectedHeight {
 		return nil, fmt.Errorf("%w: got %dx%d, expected %dx%d", ErrDimensions, config.Width, config.Height, expectedWidth, expectedHeight)
 	}
-	if config.Width < 1 || config.Width > 2040 || config.Height < 1 || config.Height > 65535 {
+	if config.Width < 1 || config.Width > 576 || config.Height < 1 || config.Height > 65535 {
 		return nil, errors.New("JPEG dimensions exceed printer limits")
 	}
 	image, err := jpeg.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid JPEG: %v", ErrFormat, err)
 	}
-	widthBytes := (config.Width + 7) / 8
-	bitmap := make([]byte, widthBytes*config.Height)
+	grayscale := make([]byte, config.Width*config.Height)
 	for y := range config.Height {
 		for x := range config.Width {
 			red, green, blue, _ := image.At(x, y).RGBA()
-			luma := (77*int(red>>8) + 150*int(green>>8) + 29*int(blue>>8)) >> 8
-			if luma < 128 {
-				bitmap[y*widthBytes+x/8] |= 0x80 >> (x % 8)
-			}
+			grayscale[y*config.Width+x] = byte((77*int(red>>8) + 150*int(green>>8) + 29*int(blue>>8)) >> 8)
 		}
 	}
-	return []printer.Job{{WidthBytes: widthBytes, HeightPx: config.Height, Data: bitmap, Copies: 1}}, nil
+	bitmap := halftoneBitmap(grayscale, config.Width, config.Height, int(profile.HalftoneMethod), int(profile.Brightness))
+	return []printer.Job{{WidthBytes: (config.Width + 7) / 8, HeightPx: config.Height, Data: bitmap, Copies: 1}}, nil
 }
 
 func decodePage(reader io.Reader, p page, profile Profile) (printer.Job, error) {
@@ -144,6 +161,10 @@ func decodePage(reader io.Reader, p page, profile Profile) (printer.Job, error) 
 	bytesPerValue := (p.bitsPerPixel + 7) / 8
 	widthBytes := (p.width + 7) / 8
 	bitmap := make([]byte, widthBytes*p.height)
+	var grayscale []byte
+	if p.bitsPerPixel != 1 {
+		grayscale = make([]byte, p.width*p.height)
+	}
 	row := 0
 	for row < p.height {
 		repeatByte, err := readByte(reader)
@@ -158,14 +179,22 @@ func decodePage(reader io.Reader, p page, profile Profile) (printer.Job, error) 
 		if row+repeats > p.height {
 			return printer.Job{}, errors.New("raster line repeat exceeds page height")
 		}
-		packed, err := packLine(line, p)
-		if err != nil {
-			return printer.Job{}, err
+		if p.bitsPerPixel == 1 {
+			packed := packMonochromeLine(line, p)
+			for range repeats {
+				copy(bitmap[row*widthBytes:], packed)
+				row++
+			}
+			continue
 		}
+		grayLine := grayscaleLine(line, p)
 		for range repeats {
-			copy(bitmap[row*widthBytes:], packed)
+			copy(grayscale[row*p.width:], grayLine)
 			row++
 		}
+	}
+	if grayscale != nil {
+		bitmap = halftoneBitmap(grayscale, p.width, p.height, int(profile.HalftoneMethod), int(profile.Brightness))
 	}
 	return printer.Job{WidthBytes: widthBytes, HeightPx: p.height, Data: bitmap, Copies: 1}, nil
 }
@@ -174,7 +203,7 @@ func validatePage(p page, profile Profile) error {
 	if p.xdpi != 203 || p.ydpi != 203 {
 		return fmt.Errorf("%w: resolution %dx%d, expected 203x203", ErrFormat, p.xdpi, p.ydpi)
 	}
-	if p.width < 1 || p.width > 2040 || p.height < 1 || p.height > 65535 {
+	if p.width < 1 || p.width > 576 || p.height < 1 || p.height > 65535 {
 		return errors.New("raster page dimensions exceed printer limits")
 	}
 	expectedWidth := dots(profile.WidthUM)
@@ -233,40 +262,142 @@ func decodeLine(reader io.Reader, bytesPerLine, bytesPerValue int) ([]byte, erro
 	return line, nil
 }
 
-func packLine(line []byte, p page) ([]byte, error) {
+func packMonochromeLine(line []byte, p page) []byte {
 	out := make([]byte, (p.width+7)/8)
-	if p.bitsPerPixel == 1 {
-		copy(out, line[:len(out)])
-		if p.colorSpace == colorW || p.colorSpace == colorSW {
-			for i := range out {
-				out[i] = ^out[i]
-			}
+	copy(out, line[:len(out)])
+	if p.colorSpace == colorW || p.colorSpace == colorSW {
+		for i := range out {
+			out[i] = ^out[i]
 		}
-		maskTrailing(out, p.width)
-		return out, nil
 	}
-	for x := range p.width {
-		black := false
-		switch p.bitsPerPixel {
-		case 8:
-			value := line[x]
+	maskTrailing(out, p.width)
+	return out
+}
+
+func grayscaleLine(line []byte, p page) []byte {
+	out := make([]byte, p.width)
+	switch p.bitsPerPixel {
+	case 8:
+		for x := range p.width {
 			if p.colorSpace == colorK {
-				black = value >= 128
+				out[x] = 255 - line[x]
 			} else {
-				black = value < 128
+				out[x] = line[x]
 			}
-		case 24:
-			off := x * 3
-			luma := (77*int(line[off]) + 150*int(line[off+1]) + 29*int(line[off+2])) >> 8
-			black = luma < 128
-		default:
-			return nil, ErrFormat
 		}
-		if black {
-			out[x/8] |= 0x80 >> (x % 8)
+	case 24:
+		for x := range p.width {
+			off := x * 3
+			out[x] = byte((77*int(line[off]) + 150*int(line[off+1]) + 29*int(line[off+2])) >> 8)
 		}
 	}
-	return out, nil
+	return out
+}
+
+func halftoneBitmap(grayscale []byte, width, height, method, brightness int) []byte {
+	values := grayscale
+	if brightness != 0 {
+		values = append([]byte(nil), grayscale...)
+		offset := brightness * 13
+		for i, value := range values {
+			values[i] = byte(max(0, min(255, int(value)+offset)))
+		}
+	}
+	switch method {
+	case HalftoneDirect:
+		return thresholdBitmap(values, width, height)
+	case HalftoneClustered:
+		return clusteredDither(values, width, height)
+	case HalftoneErrorDiffusion:
+		return extendedErrorDiffusion(values, width, height)
+	default:
+		return floydSteinberg(values, width, height)
+	}
+}
+
+func thresholdBitmap(values []byte, width, height int) []byte {
+	out := make([]byte, (width+7)/8*height)
+	for y := range height {
+		for x := range width {
+			if values[y*width+x] < 128 {
+				setBlack(out, width, x, y)
+			}
+		}
+	}
+	return out
+}
+
+func clusteredDither(values []byte, width, height int) []byte {
+	out := make([]byte, (width+7)/8*height)
+	for y := range height {
+		for x := range width {
+			if values[y*width+x] < clustered4x4[(y&3)*4+(x&3)] {
+				setBlack(out, width, x, y)
+			}
+		}
+	}
+	return out
+}
+
+func floydSteinberg(values []byte, width, height int) []byte {
+	work := make([]int, len(values))
+	for i, value := range values {
+		work[i] = int(value)
+	}
+	out := make([]byte, (width+7)/8*height)
+	for y := range height {
+		for x := range width {
+			index := y*width + x
+			old := max(0, min(255, work[index]))
+			quantized := 0
+			if old > 127 {
+				quantized = 255
+			} else {
+				setBlack(out, width, x, y)
+			}
+			diffuse(work, width, height, x+1, y, (old-quantized)*7/16)
+			diffuse(work, width, height, x-1, y+1, (old-quantized)*3/16)
+			diffuse(work, width, height, x, y+1, (old-quantized)*5/16)
+			diffuse(work, width, height, x+1, y+1, (old-quantized)/16)
+		}
+	}
+	return out
+}
+
+func extendedErrorDiffusion(values []byte, width, height int) []byte {
+	work := make([]int, len(values))
+	for i, value := range values {
+		work[i] = int(value)
+	}
+	out := make([]byte, (width+7)/8*height)
+	for y := range height {
+		for x := range width {
+			index := y*width + x
+			old := max(0, min(255, work[index]))
+			quantized := 0
+			if old > 127 {
+				quantized = 255
+			} else {
+				setBlack(out, width, x, y)
+			}
+			errorValue := old - quantized
+			for _, weight := range errorDiffusionWeights {
+				diffuse(work, width, height, x+weight.dx, y+weight.dy, errorValue*weight.numerator/42)
+			}
+		}
+	}
+	return out
+}
+
+func diffuse(values []int, width, height, x, y, errorValue int) {
+	if x >= 0 && x < width && y >= 0 && y < height {
+		values[y*width+x] += errorValue
+	}
+}
+
+func setBlack(bitmap []byte, width, x, y int) {
+	widthBytes := (width + 7) / 8
+	bitmap[y*widthBytes+x/8] |= 0x80 >> (x % 8)
 }
 
 func maskTrailing(data []byte, width int) {

@@ -47,7 +47,7 @@ var supportedOperations = []goipp.Op{
 }
 
 type Printer interface {
-	Print(context.Context, []printer.Job, printer.Settings) (printer.Result, error)
+	Print(context.Context, []printer.Job) (printer.Result, error)
 	Cancel() error
 	Status() printer.Status
 }
@@ -73,7 +73,6 @@ type queuedJob struct {
 	format   string
 	copies   int
 	profile  raster.Profile
-	settings printer.Settings
 }
 
 func New(st *store.Store, device Printer, printerID int64, slug string, logger *slog.Logger) *Server {
@@ -267,7 +266,7 @@ func (s *Server) printJob(ctx context.Context, request *goipp.Message, document 
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
-	queued := queuedJob{id: job.ID, document: data, format: format, copies: copies, profile: profileToRaster(profile), settings: profileToSettings(profile)}
+	queued := queuedJob{id: job.ID, document: data, format: format, copies: copies, profile: profileToRaster(profile)}
 	if err := s.enqueue(ctx, queued); err != nil {
 		_ = s.store.AbortJob(ctx, job.ID, err)
 		return response(request, goipp.StatusErrorTooManyJobs, err.Error())
@@ -289,7 +288,7 @@ func (s *Server) createJob(ctx context.Context, request *goipp.Message, host str
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
 	s.mu.Lock()
-	s.openJobs[job.ID] = &queuedJob{id: job.ID, format: format, copies: copies, profile: profileToRaster(profile), settings: profileToSettings(profile)}
+	s.openJobs[job.ID] = &queuedJob{id: job.ID, format: format, copies: copies, profile: profileToRaster(profile)}
 	s.mu.Unlock()
 	return s.jobResponse(request, job, host, mediaName(profile))
 }
@@ -460,7 +459,7 @@ func (s *Server) process(ctx context.Context, queued queuedJob) error {
 	for i := range bitmaps {
 		bitmaps[i].Copies = queued.copies
 	}
-	if _, err := s.printer.Print(jobCtx, bitmaps, queued.settings); err != nil {
+	if _, err := s.printer.Print(jobCtx, bitmaps); err != nil {
 		return err
 	}
 	return s.store.CompleteJob(ctx, queued.id)
@@ -691,11 +690,10 @@ func ippJobState(state string) (int32, string) {
 }
 
 func profileToRaster(profile *store.Profile) raster.Profile {
-	return raster.Profile{WidthUM: profile.WidthUm, HeightUM: profile.HeightUm}
-}
-
-func profileToSettings(profile *store.Profile) printer.Settings {
-	return printer.Settings{Darkness: int(profile.Darkness), Speed: int(profile.Speed), PaperType: int(profile.PaperType)}
+	return raster.Profile{
+		WidthUM: profile.WidthUm, HeightUM: profile.HeightUm,
+		HalftoneMethod: profile.HalftoneMethod, Brightness: profile.Brightness,
+	}
 }
 
 func printerURI(host, slug string) string {

@@ -39,7 +39,7 @@ func printCmd() *cobra.Command {
 			defer cancel()
 			result, err := p.Print(ctx, []printer.Job{{
 				WidthBytes: widthBytes, HeightPx: height, Data: bitmap, Copies: 1,
-			}}, printer.Settings{Darkness: 5, Speed: 3, PaperType: 2})
+			}})
 			if err != nil {
 				return err
 			}

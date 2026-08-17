@@ -14,9 +14,8 @@ const blankProfile: ProfileInput = {
   widthMm: 40,
   heightMm: 30,
   gapMm: 2,
-  paperType: 2,
-  darkness: 8,
-  speed: 3,
+  halftoneMethod: 0,
+  brightness: 0,
 };
 
 function useStatus() {
@@ -229,26 +228,26 @@ export function ProfilesPage() {
   if (!status.data) return <Loading />;
   function edit(profile?: Profile) {
     setEditing(profile?.id ?? null);
-    setDraft(profile ? { name: profile.name, widthMm: profile.widthMm, heightMm: profile.heightMm, gapMm: profile.gapMm, paperType: profile.paperType, darkness: profile.darkness, speed: profile.speed } : blankProfile);
+    setDraft(profile ? { name: profile.name, widthMm: profile.widthMm, heightMm: profile.heightMm, gapMm: profile.gapMm, halftoneMethod: profile.halftoneMethod, brightness: profile.brightness } : blankProfile);
   }
   async function saveProfile() {
     if (editing) await update.mutateAsync(draft); else await create.mutateAsync(draft);
     edit();
   }
   return (
-    <Page title="标签规格" description="规格可被多台打印机复用；每台打印机独立选择当前装载的标签。">
-      <Panel title="规格列表" description="正在被打印机使用的规格不能删除。">
+    <Page title="标签规格" description="普通用户只需在打印对话框选择打印机；介质和图像处理由服务按规格自动完成。">
+      <Panel title="规格列表" description="规格作为 IPP 固定介质发布；正在被打印机使用时不能删除。">
         <div className="list">
           {status.data.profiles.map((profile) => {
             const users = status.data.printers.filter((item) => item.profileId === profile.id);
             return <div className="list-row" key={profile.id}>
-              <div><strong>{profile.name}</strong><small>{profile.widthMm} × {profile.heightMm} mm · 间隙 {profile.gapMm} mm · 浓度 {profile.darkness} · 速度 {profile.speed}</small>{users.length > 0 && <span className="tag">{users.length} 台打印机使用</span>}</div>
+              <div><strong>{profile.name}</strong><small>{profile.widthMm} × {profile.heightMm} mm · 间隙 {profile.gapMm} mm</small>{(profile.halftoneMethod !== 0 || profile.brightness !== 0) && <span className="tag">专业图像设置</span>}{users.length > 0 && <span className="tag">{users.length} 台打印机使用</span>}</div>
               <div className="row-actions"><Button kind="secondary" onClick={() => edit(profile)}>编辑</Button><Button kind="ghost-danger" disabled={users.length > 0} onClick={() => window.confirm(`删除规格“${profile.name}”？`) && remove.mutate(profile.id)}>删除</Button></div>
             </div>;
           })}
         </div>
       </Panel>
-      <Panel title={editing ? "编辑规格" : "新建规格"} description="1 mm = 8 个打印点；尺寸会作为固定介质能力发布给 IPP 客户端。">
+      <Panel title={editing ? "编辑规格" : "新建规格"} description="尺寸自动发布给 IPP 客户端；默认图像处理匹配官方驱动，无需普通用户调整。">
         <ProfileForm value={draft} set={setDraft} saving={create.isPending || update.isPending} onSave={saveProfile} onCancel={editing ? () => edit() : undefined} />
         <Feedback error={create.error || update.error || remove.error} success={create.isSuccess ? "规格已创建。" : update.isSuccess ? "规格已更新。" : remove.isSuccess ? "规格已删除。" : ""} />
       </Panel>
@@ -309,8 +308,12 @@ function PrinterForm({ initial, status, currentId, fixedSlug, saving, onChange, 
 function ProfileForm({ value, set, saving, onSave, onCancel }: { value: ProfileInput; set: (value: ProfileInput) => void; saving: boolean; onSave: () => Promise<void>; onCancel?: () => void }) {
   return <form onSubmit={(event) => { event.preventDefault(); void onSave(); }}>
     <Field label="名称"><input value={value.name} onChange={(event) => set({ ...value, name: event.target.value })} required /></Field>
-    <div className="field-triple"><NumberField label="宽度（mm）" value={value.widthMm} min={2} max={255} step={0.1} set={(widthMm) => set({ ...value, widthMm })} /><NumberField label="高度（mm）" value={value.heightMm} min={2} max={255} step={0.1} set={(heightMm) => set({ ...value, heightMm })} /><NumberField label="间隙（mm）" value={value.gapMm} min={0} max={20} step={0.1} set={(gapMm) => set({ ...value, gapMm })} /></div>
-    <div className="field-triple"><NumberField label="浓度" value={value.darkness} min={0} max={11} set={(darkness) => set({ ...value, darkness })} /><NumberField label="速度" value={value.speed} min={0} max={5} set={(speed) => set({ ...value, speed })} /><Field label="纸张类型"><select value={value.paperType} onChange={(event) => set({ ...value, paperType: Number(event.target.value) })}><option value={1}>连续纸</option><option value={2}>间隙纸</option><option value={3}>黑标纸</option></select></Field></div>
+    <div className="field-triple"><NumberField label="宽度（mm）" value={value.widthMm} min={2} max={72} step={0.1} set={(widthMm) => set({ ...value, widthMm })} /><NumberField label="高度（mm）" value={value.heightMm} min={2} max={255} step={0.1} set={(heightMm) => set({ ...value, heightMm })} /><NumberField label="间隙（mm）" value={value.gapMm} min={0} max={20} step={0.1} set={(gapMm) => set({ ...value, gapMm })} /></div>
+    <details className="advanced-settings">
+      <summary>专业图像设置</summary>
+      <p>对应官方驱动的灰度处理。仅影响 JPEG 或多级灰度 PWG；客户端已生成的 1bpp 页面保持原样。</p>
+      <div className="field-pair"><Field label="半色调"><select value={value.halftoneMethod} onChange={(event) => set({ ...value, halftoneMethod: Number(event.target.value) })}><option value={0}>自动（Floyd-Steinberg）</option><option value={1}>直接阈值</option><option value={2}>4×4 聚簇有序抖动</option><option value={3}>扩展误差扩散</option></select></Field><NumberField label="亮度（-10～10）" value={value.brightness} min={-10} max={10} set={(brightness) => set({ ...value, brightness })} /></div>
+    </details>
     <div className="actions"><Button busy={saving} type="submit">{onCancel ? "更新规格" : "创建规格"}</Button>{onCancel && <Button kind="secondary" onClick={onCancel}>取消</Button>}</div>
   </form>;
 }

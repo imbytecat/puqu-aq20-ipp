@@ -153,7 +153,7 @@ func (m *Manager) Disconnect() {
 	}
 }
 
-func (m *Manager) Print(ctx context.Context, jobs []Job, settings Settings) (Result, error) {
+func (m *Manager) Print(ctx context.Context, jobs []Job) (Result, error) {
 	m.mu.Lock()
 	p := m.current
 	m.mu.Unlock()
@@ -165,7 +165,7 @@ func (m *Manager) Print(ctx context.Context, jobs []Job, settings Settings) (Res
 		m.requestReconnect()
 		return Result{}, ErrLinkDown
 	}
-	result, err := p.Print(ctx, jobs, settings)
+	result, err := p.Print(ctx, jobs)
 	if err != nil {
 		m.setError(err)
 	}

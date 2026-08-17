@@ -68,7 +68,7 @@ func TestPrintSequenceUsesOfficialUSBPageFrame(t *testing.T) {
 	p := New(fake, nil)
 	p.settleDelay = 0
 	data := []byte{0xff, 0x00, 0xff}
-	result, err := p.Print(context.Background(), []Job{{WidthBytes: 1, HeightPx: 3, Data: data, Copies: 1}}, Settings{})
+	result, err := p.Print(context.Background(), []Job{{WidthBytes: 1, HeightPx: 3, Data: data, Copies: 1}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestPrintCopiesRepeatWholePageFrame(t *testing.T) {
 	fake := newFakeLink()
 	p := New(fake, nil)
 	p.settleDelay = 0
-	result, err := p.Print(context.Background(), []Job{{WidthBytes: 1, HeightPx: 1, Data: []byte{0x80}, Copies: 2}}, Settings{})
+	result, err := p.Print(context.Background(), []Job{{WidthBytes: 1, HeightPx: 1, Data: []byte{0x80}, Copies: 2}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestManagerDoesNotReplayFailedPage(t *testing.T) {
 	manager.current.settleDelay = 0
 	manager.mu.Unlock()
 
-	_, err := manager.Print(context.Background(), []Job{{WidthBytes: 1, HeightPx: 1, Data: []byte{0xff}}}, Settings{})
+	_, err := manager.Print(context.Background(), []Job{{WidthBytes: 1, HeightPx: 1, Data: []byte{0xff}}})
 	if err == nil {
 		t.Fatal("expected write error")
 	}
@@ -127,10 +127,10 @@ func TestCancelDisconnectsLink(t *testing.T) {
 
 func TestPrintRejectsInvalidBitmap(t *testing.T) {
 	p := New(newFakeLink(), nil)
-	if _, err := p.Print(context.Background(), []Job{{WidthBytes: 2, HeightPx: 2, Data: []byte{1}}}, Settings{}); err == nil {
+	if _, err := p.Print(context.Background(), []Job{{WidthBytes: 2, HeightPx: 2, Data: []byte{1}}}); err == nil {
 		t.Fatal("expected bitmap length error")
 	}
-	if _, err := p.Print(context.Background(), []Job{{WidthBytes: 73, HeightPx: 1, Data: make([]byte, 73)}}, Settings{}); err == nil {
+	if _, err := p.Print(context.Background(), []Job{{WidthBytes: 73, HeightPx: 1, Data: make([]byte, 73)}}); err == nil {
 		t.Fatal("expected official 203 dpi width limit error")
 	}
 }
@@ -141,7 +141,7 @@ func TestCanceledContextWritesNothing(t *testing.T) {
 	p.settleDelay = 0
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := p.Print(ctx, []Job{{WidthBytes: 1, HeightPx: 1, Data: []byte{0xff}}}, Settings{})
+	_, err := p.Print(ctx, []Job{{WidthBytes: 1, HeightPx: 1, Data: []byte{0xff}}})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("error = %v, want context canceled", err)
 	}

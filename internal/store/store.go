@@ -148,13 +148,12 @@ func (s *Store) Profile(ctx context.Context, id int64) (*Profile, error) {
 }
 
 type ProfileInput struct {
-	Name      string
-	WidthUM   int64
-	HeightUM  int64
-	GapUM     int64
-	PaperType int64
-	Darkness  int64
-	Speed     int64
+	Name           string
+	WidthUM        int64
+	HeightUM       int64
+	GapUM          int64
+	HalftoneMethod int64
+	Brightness     int64
 }
 
 func validateProfile(input ProfileInput) error {
@@ -162,11 +161,11 @@ func validateProfile(input ProfileInput) error {
 	if input.Name == "" {
 		return errors.New("profile name is required")
 	}
-	if input.WidthUM <= 0 || input.HeightUM <= 0 || input.GapUM < 0 {
+	if input.WidthUM <= 0 || input.WidthUM > 72000 || input.HeightUM <= 0 || input.GapUM < 0 {
 		return errors.New("profile dimensions are invalid")
 	}
-	if input.PaperType < 1 || input.PaperType > 3 || input.Darkness < 0 || input.Darkness > 11 || input.Speed < 0 || input.Speed > 5 {
-		return errors.New("profile printer settings are invalid")
+	if input.HalftoneMethod < 0 || input.HalftoneMethod > 3 || input.Brightness < -10 || input.Brightness > 10 {
+		return errors.New("profile raster settings are invalid")
 	}
 	return nil
 }
@@ -179,7 +178,7 @@ func (s *Store) CreateProfile(ctx context.Context, input ProfileInput) (*Profile
 	now := unixMillis(time.Now())
 	return s.q.CreateProfile(ctx, sqlitedb.CreateProfileParams{
 		Name: input.Name, WidthUm: input.WidthUM, HeightUm: input.HeightUM, GapUm: input.GapUM,
-		PaperType: input.PaperType, Darkness: input.Darkness, Speed: input.Speed,
+		HalftoneMethod: input.HalftoneMethod, Brightness: input.Brightness,
 		CreatedAt: now, UpdatedAt: now,
 	})
 }
@@ -191,7 +190,7 @@ func (s *Store) UpdateProfile(ctx context.Context, id int64, input ProfileInput)
 	}
 	return s.q.UpdateProfile(ctx, sqlitedb.UpdateProfileParams{
 		Name: input.Name, WidthUm: input.WidthUM, HeightUm: input.HeightUM, GapUm: input.GapUM,
-		PaperType: input.PaperType, Darkness: input.Darkness, Speed: input.Speed,
+		HalftoneMethod: input.HalftoneMethod, Brightness: input.Brightness,
 		UpdatedAt: unixMillis(time.Now()), ID: id,
 	})
 }

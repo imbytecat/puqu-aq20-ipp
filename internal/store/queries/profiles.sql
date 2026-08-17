@@ -6,13 +6,13 @@ SELECT * FROM label_profiles WHERE id = ?;
 
 -- name: CreateProfile :one
 INSERT INTO label_profiles (
-    name, width_um, height_um, gap_um, paper_type, darkness, speed, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    name, width_um, height_um, gap_um, halftone_method, brightness, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: UpdateProfile :one
 UPDATE label_profiles
-SET name = ?, width_um = ?, height_um = ?, gap_um = ?, paper_type = ?, darkness = ?, speed = ?, updated_at = ?
+SET name = ?, width_um = ?, height_um = ?, gap_um = ?, halftone_method = ?, brightness = ?, updated_at = ?
 WHERE id = ?
 RETURNING *;
 

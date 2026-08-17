@@ -56,9 +56,8 @@ export type Profile = {
   widthMm: number;
   heightMm: number;
   gapMm: number;
-  paperType: number;
-  darkness: number;
-  speed: number;
+  halftoneMethod: number;
+  brightness: number;
 };
 
 export type Job = {

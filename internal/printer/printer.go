@@ -19,12 +19,6 @@ type Job struct {
 	Copies     int
 }
 
-type Settings struct {
-	Darkness  int
-	Speed     int
-	PaperType int
-}
-
 type Result struct {
 	Jobs  int
 	Bytes int
@@ -73,7 +67,7 @@ func (p *Printer) Busy() bool {
 func (p *Printer) Disconnect() error { return p.link.Disconnect() }
 func (p *Printer) Cancel() error     { return p.Disconnect() }
 
-func (p *Printer) Print(ctx context.Context, jobs []Job, _ Settings) (Result, error) {
+func (p *Printer) Print(ctx context.Context, jobs []Job) (Result, error) {
 	p.printMu.Lock()
 	defer p.printMu.Unlock()
 
