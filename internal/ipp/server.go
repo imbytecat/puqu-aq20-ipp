@@ -482,7 +482,9 @@ func (s *Server) getJobAttributes(ctx context.Context, request *goipp.Message, h
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
-	return s.jobResponse(request, job, host)
+	reply := response(request, goipp.StatusOk, "")
+	reply.Job = filterJobAttributes(request, jobAttributes(job, printerURI(host), s.started), false)
+	return reply
 }
 
 func (s *Server) getJobs(ctx context.Context, request *goipp.Message, host string) *goipp.Message {
@@ -505,7 +507,8 @@ func (s *Server) getJobs(ctx context.Context, request *goipp.Message, host strin
 		if !jobMatches(which, job.State) || myJobs && job.UserName != user {
 			continue
 		}
-		reply.Groups.Add(goipp.Group{Tag: goipp.TagJobGroup, Attrs: jobAttributes(job, printerURI(host), s.started)})
+		attrs := filterJobAttributes(request, jobAttributes(job, printerURI(host), s.started), true)
+		reply.Groups.Add(goipp.Group{Tag: goipp.TagJobGroup, Attrs: attrs})
 		count++
 	}
 	return reply
@@ -588,6 +591,37 @@ func jobMatches(which, state string) bool {
 	default:
 		return state == which
 	}
+}
+func filterJobAttributes(request *goipp.Message, attrs goipp.Attributes, getJobs bool) goipp.Attributes {
+	requested := stringAttrs(request, "requested-attributes")
+	if len(requested) == 0 {
+		if !getJobs {
+			return attrs
+		}
+		requested = []string{"job-id", "job-uri"}
+	}
+	exact := make(map[string]bool, len(requested))
+	all := false
+	for _, name := range requested {
+		switch name {
+		case "none":
+			return nil
+		case "all":
+			all = true
+		default:
+			exact[name] = true
+		}
+	}
+	if all {
+		return attrs
+	}
+	filtered := make(goipp.Attributes, 0, len(exact))
+	for _, attribute := range attrs {
+		if exact[attribute.Name] {
+			filtered = append(filtered, attribute)
+		}
+	}
+	return filtered
 }
 
 func ippJobState(state string) (int32, string) {

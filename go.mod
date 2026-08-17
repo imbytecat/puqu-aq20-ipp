@@ -5,7 +5,7 @@ go 1.26
 require (
 	github.com/OpenPrinting/goipp v1.2.0
 	github.com/godbus/dbus/v5 v5.2.2
-	github.com/grandcat/zeroconf v1.0.0
+	github.com/grandcat/zeroconf v1.0.1-0.20230119201135-e4f60f8407b1
 	github.com/kardianos/service v1.3.0
 	github.com/ncruces/go-sqlite3 v0.35.3
 	github.com/pressly/goose/v3 v3.27.3
