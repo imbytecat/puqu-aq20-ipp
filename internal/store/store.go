@@ -219,8 +219,6 @@ type PrinterInput struct {
 	DeviceID  int64
 	ProfileID int64
 	Enabled   bool
-	Advertise bool
-	AirPrint  bool
 }
 
 func (s *Store) Printers(ctx context.Context) ([]*Printer, error) {
@@ -254,8 +252,7 @@ func (s *Store) CreatePrinter(ctx context.Context, input PrinterInput) (*Printer
 	now := unixMillis(time.Now())
 	return s.q.CreatePrinter(ctx, sqlitedb.CreatePrinterParams{
 		Name: input.Name, Slug: input.Slug, Uuid: uuid, Driver: input.Driver,
-		DeviceID: nullableID(input.DeviceID), ProfileID: input.ProfileID,
-		Enabled: boolInt(input.Enabled), Advertise: boolInt(input.Advertise), Airprint: boolInt(input.AirPrint),
+		DeviceID: nullableID(input.DeviceID), ProfileID: input.ProfileID, Enabled: boolInt(input.Enabled),
 		CreatedAt: now, UpdatedAt: now,
 	})
 }
@@ -270,8 +267,7 @@ func (s *Store) UpdatePrinter(ctx context.Context, id int64, input PrinterInput)
 	}
 	return s.q.UpdatePrinter(ctx, sqlitedb.UpdatePrinterParams{
 		Name: input.Name, Driver: input.Driver, DeviceID: nullableID(input.DeviceID), ProfileID: input.ProfileID,
-		Enabled: boolInt(input.Enabled), Advertise: boolInt(input.Advertise), Airprint: boolInt(input.AirPrint),
-		UpdatedAt: unixMillis(time.Now()), ID: id,
+		Enabled: boolInt(input.Enabled), UpdatedAt: unixMillis(time.Now()), ID: id,
 	})
 }
 

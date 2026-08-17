@@ -1,6 +1,10 @@
 export type RuntimeConfig = {
+  configFile: string;
+  configFileLoaded: boolean;
+  dataPath: string;
   ippListen: string;
   adminListen: string;
+  logLevel: string;
 };
 
 export type Driver = {
@@ -26,8 +30,6 @@ export type Printer = {
   deviceId: number | null;
   profileId: number;
   enabled: boolean;
-  advertise: boolean;
-  airPrint: boolean;
   status: PrinterStatus;
   queueDepth: number;
   updatedAt: number;
@@ -87,5 +89,5 @@ export type Status = {
   jobs: Job[];
 };
 
-export type PrinterInput = Pick<Printer, "name" | "slug" | "driver" | "deviceId" | "profileId" | "enabled" | "advertise" | "airPrint">;
+export type PrinterInput = Pick<Printer, "name" | "slug" | "driver" | "deviceId" | "profileId" | "enabled">;
 export type ProfileInput = Omit<Profile, "id">;

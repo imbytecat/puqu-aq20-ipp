@@ -25,8 +25,8 @@ func TestAdminRoutesPersistMultiplePrinters(t *testing.T) {
 	}
 	defer st.Close()
 	printerFleet := fleet.New(st)
-	runtimeConfig := config.Config{IPPListen: ":8631", AdminListen: "127.0.0.1:8080"}
-	ippGateway := ipp.NewGateway(st, printerFleet, runtimeConfig.IPPListen, runtimeConfig.AdminListen, nil)
+	runtimeConfig := config.Defaults()
+	ippGateway := ipp.NewGateway(st, printerFleet, nil)
 	ui := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`<div id="root"></div>`)) })
 	handler := New(st, printerFleet, ippGateway, runtimeConfig, ui, "test").Handler()
 
@@ -52,13 +52,13 @@ func TestAdminRoutesPersistMultiplePrinters(t *testing.T) {
 	response = serve(handler, http.MethodPost, "/api/printers", []byte(`{
 		"name":"Warehouse Labels","slug":"warehouse-labels","driver":"puqu-aq20",
 		"deviceId":`+strconv64(device.ID)+`,"profileId":`+strconv64(printers[0].ProfileID)+`,
-		"enabled":true,"advertise":true,"airPrint":true
+		"enabled":true
 	}`))
 	if response.Code != http.StatusCreated || !strings.Contains(response.Body.String(), `"slug":"warehouse-labels"`) {
 		t.Fatalf("create printer: %d %s", response.Code, response.Body.String())
 	}
 	configured, err := st.PrinterBySlug(ctx, "warehouse-labels")
-	if err != nil || !configured.DeviceID.Valid || configured.DeviceID.Int64 != device.ID || configured.Airprint != 1 {
+	if err != nil || !configured.DeviceID.Valid || configured.DeviceID.Int64 != device.ID {
 		t.Fatalf("printer = %+v, err=%v", configured, err)
 	}
 
@@ -72,8 +72,8 @@ func TestAdminServesUIAndRejectsRemoteBitmapEndpoint(t *testing.T) {
 	}
 	defer st.Close()
 	printerFleet := fleet.New(st)
-	runtimeConfig := config.Config{IPPListen: ":8631", AdminListen: "127.0.0.1:8080"}
-	ippGateway := ipp.NewGateway(st, printerFleet, runtimeConfig.IPPListen, runtimeConfig.AdminListen, nil)
+	runtimeConfig := config.Defaults()
+	ippGateway := ipp.NewGateway(st, printerFleet, nil)
 	ui := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`<div id="root"></div>`)) })
 	handler := New(st, printerFleet, ippGateway, runtimeConfig, ui, "test").Handler()
 

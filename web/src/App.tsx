@@ -46,7 +46,7 @@ export function RootLayout() {
       </aside>
       <main className="content">
         <header className="topbar">
-          <div><p className="eyebrow">IPP EVERYWHERE · BLUETOOTH LE</p><h1>标签打印管理</h1></div>
+          <div><p className="eyebrow">DRIVERLESS IPP · BLUETOOTH LE</p><h1>标签打印管理</h1></div>
           <div className={`service-pill ${status.isError ? "offline" : "online"}`}><span />{status.isError ? "服务异常" : "服务运行中"}</div>
         </header>
         {status.error && <Feedback error={status.error} />}
@@ -100,8 +100,6 @@ export function PrintersPage() {
     deviceId: null,
     profileId: status.data.profiles[0]?.id ?? 0,
     enabled: true,
-    advertise: true,
-    airPrint: true,
   };
   async function save(value: PrinterInput) {
     const created = await create.mutateAsync(value);
@@ -264,19 +262,21 @@ export function RuntimePage() {
   const status = useStatus();
   if (!status.data) return <Loading />;
   return (
-    <Page title="运行配置" description="监听地址属于进程启动配置，不写入 SQLite，也不在管理界面中热修改。">
+    <Page title="运行配置" description="启动配置由 Koanf 统一加载；修改后重启服务，不写入 SQLite，也不在管理界面热修改。">
       <div className="metrics compact">
+        <Metric label="配置文件" value={status.data.config.configFileLoaded ? "已加载" : "使用默认值"} detail={status.data.config.configFile} />
         <Metric label="IPP 监听" value={status.data.config.ippListen} detail="系统打印客户端连接入口" />
         <Metric label="管理界面监听" value={status.data.config.adminListen} detail="必须绑定本机回环地址" />
-        <Metric label="数据库" value="SQLite" detail="仅保存业务状态和任务历史" />
-        <Metric label="配置优先级" value="CLI > 环境变量" detail="未设置时使用安全默认值" />
+        <Metric label="数据库" value={status.data.config.dataPath} detail="仅保存业务状态和任务历史" />
+        <Metric label="日志级别" value={status.data.config.logLevel} detail="debug / info / warn / error" />
+        <Metric label="配置优先级" value="CLI > 环境变量 > TOML" detail="最后回退到安全默认值" />
       </div>
-      <Panel title="启动参数" description="修改参数后重启服务。服务安装命令会将当前参数写入系统服务定义。">
-        <pre><code>{`puqu-ipp --ipp-listen ${status.data.config.ippListen} --admin-listen ${status.data.config.adminListen}`}</code></pre>
-        <p className="hint">环境变量：<code>PUQU_IPP_LISTEN</code>、<code>PUQU_ADMIN_LISTEN</code>。管理端口只允许 localhost 或回环 IP。</p>
+      <Panel title="配置入口" description="系统服务只持久化配置文件路径，避免安装参数覆盖后续文件修改。">
+        <pre><code>{`puqu-ipp --config ${JSON.stringify(status.data.config.configFile)}`}</code></pre>
+        <p className="hint">环境变量：<code>PUQU_CONFIG</code>、<code>PUQU_DATA_PATH</code>、<code>PUQU_IPP_LISTEN</code>、<code>PUQU_ADMIN_LISTEN</code>、<code>PUQU_LOG_LEVEL</code>。</p>
       </Panel>
-      <Panel title="数据归属" description="启动配置和业务配置分离，避免数据库值与当前监听状态不一致。">
-        <div className="split-list"><div><strong>启动配置</strong><p>监听地址、数据库路径、服务进程参数。</p></div><div><strong>SQLite 业务状态</strong><p>打印机、设备、标签规格、AirPrint/DNS-SD 开关和任务记录。</p></div></div>
+      <Panel title="数据归属" description="进程配置和业务状态保持单一数据源。">
+        <div className="split-list"><div><strong>Koanf 启动配置</strong><p>配置文件路径、监听地址、数据库路径、日志级别。</p></div><div><strong>SQLite 业务状态</strong><p>打印机、设备、标签规格和任务记录。</p></div></div>
       </Panel>
     </Page>
   );
@@ -284,12 +284,12 @@ export function RuntimePage() {
 
 function PrinterForm({ initial, status, currentId, fixedSlug, saving, onChange, onSave }: { initial: PrinterInput; status: Status; currentId?: number; fixedSlug?: boolean; saving: boolean; onChange?: (value: PrinterInput) => void; onSave: (value: PrinterInput) => Promise<unknown> }) {
   const [value, setValue] = useState(initial);
-  useEffect(() => setValue(initial), [initial.name, initial.slug, initial.deviceId, initial.profileId, initial.enabled, initial.advertise, initial.airPrint]);
+  useEffect(() => setValue(initial), [initial.name, initial.slug, initial.deviceId, initial.profileId, initial.enabled]);
   function change(next: PrinterInput) { setValue(next); onChange?.(next); }
   return <form onSubmit={(event) => { event.preventDefault(); void onSave(value); }}>
     <div className="field-pair"><Field label="显示名称"><input value={value.name} onChange={(event) => change({ ...value, name: event.target.value })} required /></Field><Field label="队列名称"><input value={value.slug} disabled={fixedSlug} onChange={(event) => change({ ...value, slug: event.target.value })} placeholder="shipping-labels" required /></Field></div>
     <div className="field-triple"><Field label="驱动"><select value={value.driver} onChange={(event) => change({ ...value, driver: event.target.value })}>{status.drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.name}</option>)}</select></Field><Field label="物理设备"><select value={value.deviceId ?? ""} onChange={(event) => change({ ...value, deviceId: event.target.value ? Number(event.target.value) : null })}><option value="">暂不分配</option>{status.devices.map((device) => <option key={device.id} value={device.id} disabled={device.assignedPrinterId !== null && device.assignedPrinterId !== currentId}>{device.name || device.nativeId}{device.assignedPrinterId !== null && device.assignedPrinterId !== currentId ? "（已占用）" : ""}</option>)}</select></Field><Field label="标签规格"><select value={value.profileId || ""} onChange={(event) => change({ ...value, profileId: Number(event.target.value) })} required><option value="" disabled>请选择</option>{status.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name} · {profile.widthMm}×{profile.heightMm} mm</option>)}</select></Field></div>
-    <div className="toggles"><Toggle checked={value.enabled} set={(enabled) => change({ ...value, enabled })}>启用队列</Toggle><Toggle checked={value.advertise} set={(advertise) => change({ ...value, advertise })}>通过 DNS-SD 发布</Toggle><Toggle checked={value.airPrint} set={(airPrint) => change({ ...value, airPrint })}>启用 AirPrint 兼容属性</Toggle></div>
+    <div className="toggles"><Toggle checked={value.enabled} set={(enabled) => change({ ...value, enabled })}>启用队列</Toggle></div>
     <Button busy={saving} type="submit">保存打印机</Button>
   </form>;
 }
@@ -336,7 +336,7 @@ function Empty({ children }: { children: React.ReactNode }) { return <p classNam
 function Loading() { return <div className="loading">正在读取打印服务状态…</div>; }
 function StatusDot({ printer }: { printer: Printer }) { return <span className={`status-dot ${printer.status.connected ? printer.status.busy ? "busy" : "connected" : printer.status.connecting ? "busy" : "offline"}`}>{printerState(printer)}</span>; }
 
-function toPrinterInput(value: Printer): PrinterInput { return { name: value.name, slug: value.slug, driver: value.driver, deviceId: value.deviceId, profileId: value.profileId, enabled: value.enabled, advertise: value.advertise, airPrint: value.airPrint }; }
+function toPrinterInput(value: Printer): PrinterInput { return { name: value.name, slug: value.slug, driver: value.driver, deviceId: value.deviceId, profileId: value.profileId, enabled: value.enabled }; }
 function printerState(value: Printer) { if (!value.enabled) return "已停用"; if (value.status.connected) return value.status.busy ? "打印中" : "已连接"; return value.status.connecting ? "连接中" : "离线"; }
 function printerURI(status: Status, printer: Printer) { const port = status.config.ippListen.split(":").at(-1); return `ipp://${window.location.hostname}:${port}/ipp/${printer.slug}`; }
 function jobState(value: string) { return ({ pending: "等待", processing: "打印中", completed: "完成", canceled: "已取消", aborted: "失败" } as Record<string, string>)[value] || value; }

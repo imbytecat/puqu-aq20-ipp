@@ -13,7 +13,6 @@ import (
 const serviceRunName = "service-run"
 
 type serviceProgram struct {
-	data   string
 	config config.Config
 	cancel context.CancelFunc
 	done   chan error
@@ -26,7 +25,7 @@ func (p *serviceProgram) Start(service.Service) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 	p.done = make(chan error, 1)
-	go func() { p.done <- runDaemon(ctx, p.data, p.config) }()
+	go func() { p.done <- runDaemon(ctx, p.config) }()
 	return nil
 }
 
@@ -50,8 +49,14 @@ func serviceCmd() *cobra.Command {
 		Args:      cobra.ExactArgs(1),
 		ValidArgs: []string{"install", "uninstall", "start", "stop", "restart", "status"},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			data, _ := cmd.Flags().GetString("data")
-			svc, err := newService(data, commandConfig(cmd))
+			runtimeConfig, err := commandConfig(cmd)
+			if err != nil {
+				return err
+			}
+			if args[0] == "install" && runtimeConfig.HasEphemeralOverrides() {
+				return fmt.Errorf("service install only persists %s; move environment or CLI overrides into that file", runtimeConfig.ConfigFile)
+			}
+			svc, err := newService(runtimeConfig)
 			if err != nil {
 				return err
 			}
@@ -73,8 +78,11 @@ func serviceRunCmd() *cobra.Command {
 		Use:    serviceRunName,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			data, _ := cmd.Flags().GetString("data")
-			svc, err := newService(data, commandConfig(cmd))
+			runtimeConfig, err := commandConfig(cmd)
+			if err != nil {
+				return err
+			}
+			svc, err := newService(runtimeConfig)
 			if err != nil {
 				return err
 			}
@@ -83,18 +91,14 @@ func serviceRunCmd() *cobra.Command {
 	}
 }
 
-func newService(data string, runtimeConfig config.Config) (service.Service, error) {
-	arguments := []string{
-		serviceRunName,
-		"--ipp-listen", runtimeConfig.IPPListen,
-		"--admin-listen", runtimeConfig.AdminListen,
+func newService(runtimeConfig config.Config) (service.Service, error) {
+	arguments := []string{serviceRunName}
+	if runtimeConfig.ConfigFileLoaded {
+		arguments = append(arguments, "--config", runtimeConfig.ConfigFile)
 	}
-	if data != "" {
-		arguments = append(arguments, "--data", data)
-	}
-	return service.New(&serviceProgram{data: data, config: runtimeConfig}, &service.Config{
+	return service.New(&serviceProgram{config: runtimeConfig}, &service.Config{
 		Name: "puqu-aq20-ipp", DisplayName: "PUQU AQ20 IPP Bridge",
-		Description: "Exposes PUQU AQ20 Bluetooth label printers through IPP Everywhere.",
+		Description: "Exposes PUQU AQ20 Bluetooth label printers through direct IPP queues.",
 		Arguments:   arguments,
 	})
 }

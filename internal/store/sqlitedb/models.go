@@ -56,8 +56,6 @@ type Printer struct {
 	DeviceID  sql.NullInt64 `json:"device_id"`
 	ProfileID int64         `json:"profile_id"`
 	Enabled   int64         `json:"enabled"`
-	Advertise int64         `json:"advertise"`
-	Airprint  int64         `json:"airprint"`
 	CreatedAt int64         `json:"created_at"`
 	UpdatedAt int64         `json:"updated_at"`
 }

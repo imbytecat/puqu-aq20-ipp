@@ -15,7 +15,6 @@ import (
 
 const (
 	FormatPWG      = "image/pwg-raster"
-	FormatApple    = "image/urf"
 	FormatJPEG     = "image/jpeg"
 	pageHeaderSize = 1796
 	maxRasterBytes = 16 << 20
@@ -66,11 +65,6 @@ func Decode(input io.Reader, format string, profile Profile) ([]printer.Job, err
 			return nil, fmt.Errorf("%w: expected PWG RaS2 sync", ErrFormat)
 		}
 		return decodePWG(reader, profile)
-	case FormatApple:
-		if !bytes.Equal(sync, []byte("UNIR")) {
-			return nil, fmt.Errorf("%w: expected Apple UNIR sync", ErrFormat)
-		}
-		return decodeApple(reader, profile)
 	default:
 		return nil, ErrFormat
 	}
@@ -106,44 +100,6 @@ func decodePWG(reader *bufio.Reader, profile Profile) ([]printer.Job, error) {
 	return jobs, nil
 }
 
-func decodeApple(reader *bufio.Reader, profile Profile) ([]printer.Job, error) {
-	fileHeader := make([]byte, 8)
-	if _, err := io.ReadFull(reader, fileHeader); err != nil {
-		return nil, fmt.Errorf("read Apple raster file header: %w", err)
-	}
-	if !bytes.Equal(fileHeader[:4], []byte{'A', 'S', 'T', 0}) {
-		return nil, fmt.Errorf("%w: invalid Apple raster file header", ErrFormat)
-	}
-	pageCount := binary.BigEndian.Uint32(fileHeader[4:])
-	if pageCount == 0 || pageCount > 1000 {
-		return nil, errors.New("invalid Apple raster page count")
-	}
-	jobs := make([]printer.Job, 0, pageCount)
-	for range pageCount {
-		header := make([]byte, 32)
-		if _, err := io.ReadFull(reader, header); err != nil {
-			return nil, fmt.Errorf("read Apple raster page header: %w", err)
-		}
-		colors, colorSpace := appleColorSpace(header[1])
-		bitsPerPixel := int(header[0])
-		if colors == 0 || bitsPerPixel%colors != 0 {
-			return nil, ErrFormat
-		}
-		p := page{
-			width: int(binary.BigEndian.Uint32(header[12:16])), height: int(binary.BigEndian.Uint32(header[16:20])),
-			xdpi: int(binary.BigEndian.Uint32(header[20:24])), ydpi: int(binary.BigEndian.Uint32(header[20:24])),
-			bitsPerColor: bitsPerPixel / colors, bitsPerPixel: bitsPerPixel,
-			bytesPerLine: (int(binary.BigEndian.Uint32(header[12:16]))*bitsPerPixel + 7) / 8,
-			colorOrder:   0, colorSpace: colorSpace,
-		}
-		job, err := decodePage(reader, p, profile)
-		if err != nil {
-			return nil, err
-		}
-		jobs = append(jobs, job)
-	}
-	return jobs, nil
-}
 func decodeJPEG(input io.Reader, profile Profile) ([]printer.Job, error) {
 	data, err := io.ReadAll(io.LimitReader(input, maxRasterBytes+1))
 	if err != nil {
@@ -179,23 +135,6 @@ func decodeJPEG(input io.Reader, profile Profile) ([]printer.Job, error) {
 		}
 	}
 	return []printer.Job{{WidthBytes: widthBytes, HeightPx: config.Height, Data: bitmap, Copies: 1}}, nil
-}
-
-func appleColorSpace(value byte) (colors, colorSpace int) {
-	switch value {
-	case 0:
-		return 1, colorSW
-	case 1:
-		return 3, colorSRGB
-	case 3:
-		return 3, colorAdobeRGB
-	case 4:
-		return 1, colorW
-	case 5:
-		return 3, colorRGB
-	default:
-		return 0, 0
-	}
 }
 
 func decodePage(reader io.Reader, p page, profile Profile) (printer.Job, error) {

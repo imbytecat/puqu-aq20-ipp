@@ -2,7 +2,7 @@
 
 ## Print server
 
-One deployed instance that manages physical devices and publishes one or more printers to network clients.
+One deployed instance that manages physical devices and serves one or more direct-addressed IPP queues.
 
 ## Driver
 
@@ -14,7 +14,7 @@ A discovered or saved physical endpoint. A device describes how the print server
 
 ## Printer
 
-A configured logical print queue published by the print server. Each printer has a stable queue path and UUID, selects one driver, may attach one device, and selects one label profile. A physical device belongs to at most one printer.
+A configured logical IPP queue with a stable path and UUID. Each printer selects one driver, may attach one device, and selects one label profile. A physical device belongs to at most one printer.
 
 ## Label profile
 

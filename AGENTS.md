@@ -1,14 +1,14 @@
 # AGENTS.md
 
-Cross-platform daemon exposing multiple PUQU AQ20-compatible BLE label printers as driverless IPP printers. One Go binary owns Bluetooth, IPP, DNS-SD, SQLite, per-printer queues, and an embedded local React administration UI.
+Cross-platform daemon exposing multiple PUQU AQ20-compatible BLE label printers as direct-addressed driverless IPP printers. One Go binary owns Bluetooth, IPP, SQLite, per-printer queues, and an embedded local React administration UI.
 
 ## Architecture
 
-- `cmd/puqu-ipp/` — cobra CLI, bootstrap flags/env, diagnostics, hardware test print, native service management.
-- `internal/config/` — process bootstrap config. Listen addresses live here, not SQLite.
+- `cmd/puqu-ipp/` — cobra CLI, Koanf bootstrap loading, diagnostics, hardware test print, native service management.
+- `internal/config/` — immutable process bootstrap config from TOML, environment, and CLI. Listener/data/log settings live here, not SQLite.
 - `internal/fleet/` — configured printer runtimes and driver registry. One `printer.Manager` per enabled logical printer.
-- `internal/ipp/` — IPP gateway routing `/ipp/<slug>` to isolated queues plus per-printer DNS-SD records.
-- `internal/raster/` — pure PWG Raster, Apple Raster, and JPEG decoding. Exact 203 dpi profile dimensions; no silent scaling.
+- `internal/ipp/` — IPP gateway routing stable `/ipp/<slug>` paths to isolated queues. No mDNS/DNS-SD discovery.
+- `internal/raster/` — pure PWG Raster and JPEG decoding. Exact 203 dpi profile dimensions; no silent scaling.
 - `internal/printer/` — one physical printer connection, reconnect loop, serialized print/cancel flow.
 - `internal/ble/` — device-agnostic native BlueZ/CoreBluetooth/WinRT central. Adapter scans serialize; connections coexist.
 - `internal/puqu/` — pure reverse-engineered PUQU wire protocol.
@@ -25,10 +25,9 @@ Dependencies point inward: delivery modules call `fleet`, `store`, `printer`, an
 - A physical device belongs to at most one printer. Profiles may be shared.
 - Each printer has an isolated ordered queue; different printers may print concurrently.
 - Jobs belong to exactly one printer and never move between queues.
-- IPP accepts PWG Raster/JPEG; Apple Raster only when that printer enables AirPrint.
-- DNS-SD publishes one record per enabled advertised printer.
-- Bootstrap config uses CLI/env: `--ipp-listen`, `--admin-listen`, `PUQU_IPP_LISTEN`, `PUQU_ADMIN_LISTEN`. Admin listen stays loopback-only.
-- SQLite stores business state and job history, never listener addresses.
+- IPP accepts PWG Raster and JPEG only. Clients connect directly to `ipp://HOST:PORT/ipp/<slug>`; CUPS may sit above the bridge when discovery or format conversion is needed.
+- Bootstrap config precedence is CLI > environment > TOML > defaults. Default file: OS user config directory `puqu-aq20-ipp/config.toml`; admin listen stays loopback-only.
+- SQLite stores mutable business state and job history, never process bootstrap settings.
 - Documents are bounded at 16 MiB; each printer queue capacity is 32.
 - Restart aborts uncertain pending/processing jobs; never replay unknown hardware state.
 
@@ -60,6 +59,6 @@ Hardware commands: `mise run discover`, `mise run print`, `mise run smoke`.
 ## Verification
 
 - IPP: targeted Go tests; CUPS `ipptool` for operation/attribute changes.
-- DNS-SD: browse `_print._sub._ipp._tcp` and `_universal._sub._ipp._tcp` when enabled.
+- Config: test defaults/file/env/CLI precedence, strict unknown-key rejection, and service config-path persistence.
 - UI: typecheck/build, then exercise changed routes in a browser at desktop and mobile widths.
 - BLE/hardware: use `discover`, `print`, or `smoke`; state untested platforms and hardware explicitly.

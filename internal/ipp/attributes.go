@@ -44,11 +44,6 @@ func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Messag
 	uri := printerURI(host, s.slug)
 	media := mediaName(profile)
 	formats := []goipp.Value{goipp.String(raster.FormatPWG), goipp.String(raster.FormatJPEG)}
-	commands := "PWGRaster,JPEG"
-	if target.Airprint == 1 {
-		formats = append(formats, goipp.String(raster.FormatApple))
-		commands += ",AppleRaster"
-	}
 	operations := make([]goipp.Value, len(supportedOperations))
 	for i, operation := range supportedOperations {
 		operations[i] = goipp.Integer(operation)
@@ -80,7 +75,7 @@ func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Messag
 	attrs.Add(goipp.MakeAttr("printer-make-and-model", goipp.TagText, goipp.String("PUQU AQ20 IPP Bridge")))
 	attrs.Add(goipp.MakeAttr("printer-more-info", goipp.TagURI, goipp.String(httpURI(host, "/"))))
 	attrs.Add(goipp.MakeAttr("printer-uuid", goipp.TagURI, goipp.String("urn:uuid:"+target.Uuid)))
-	attrs.Add(goipp.MakeAttr("printer-device-id", goipp.TagText, goipp.String("MFG:PUQU;MDL:AQ20;CMD:"+commands+";")))
+	attrs.Add(goipp.MakeAttr("printer-device-id", goipp.TagText, goipp.String("MFG:PUQU;MDL:AQ20;CMD:PWGRaster,JPEG;")))
 	attrs.Add(goipp.MakeAttr("printer-state", goipp.TagEnum, goipp.Integer(printerState)))
 	attrs.Add(goipp.MakeAttr("printer-state-reasons", goipp.TagKeyword, goipp.String(reasons)))
 	attrs.Add(goipp.MakeAttr("printer-state-message", goipp.TagText, goipp.String(state.LastError)))
@@ -93,7 +88,6 @@ func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Messag
 	attrs.Add(goipp.MakeAttr("printer-state-change-time", goipp.TagInteger, goipp.Integer(0)))
 	attrs.Add(goipp.MakeAttr("printer-config-change-time", goipp.TagInteger, goipp.Integer(max(0, target.UpdatedAt/1000-s.started.Unix()))))
 	attrs.Add(goipp.MakeAttr("ipp-versions-supported", goipp.TagKeyword, goipp.String("1.1"), goipp.String("2.0")))
-	attrs.Add(goipp.MakeAttr("ipp-features-supported", goipp.TagKeyword, goipp.String("ipp-everywhere")))
 	attrs.Add(goipp.MakeAttr("operations-supported", goipp.TagEnum, operations[0], operations[1:]...))
 	attrs.Add(goipp.MakeAttr("identify-actions-default", goipp.TagKeyword, goipp.String("display")))
 	attrs.Add(goipp.MakeAttr("identify-actions-supported", goipp.TagKeyword, goipp.String("display")))
@@ -174,10 +168,6 @@ func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Messag
 	attrs.Add(goipp.MakeAttr("printer-supply", goipp.TagString, goipp.Binary("index=1;class=supplyThatIsFilled;type=unknown;unit=percent;maxcapacity=100;level=-2;")))
 	attrs.Add(goipp.MakeAttr("printer-supply-description", goipp.TagText, goipp.String("Thermal label media")))
 	attrs.Add(goipp.MakeAttr("printer-supply-info-uri", goipp.TagURI, goipp.String(httpURI(host, "/"))))
-	if target.Airprint == 1 {
-		attrs.Add(goipp.MakeAttr("urf-supported", goipp.TagKeyword,
-			goipp.String("W8"), goipp.String("SRGB24"), goipp.String("RS203"), goipp.String("DM1")))
-	}
 	reply.Printer = filterPrinterAttributes(request, reply.Printer)
 	return reply
 }

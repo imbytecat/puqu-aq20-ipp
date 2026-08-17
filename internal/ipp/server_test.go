@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,16 +32,6 @@ func (f *fakePrinter) Print(_ context.Context, jobs []printer.Job, _ printer.Set
 }
 func (f *fakePrinter) Cancel() error          { return nil }
 func (f *fakePrinter) Status() printer.Status { return printer.Status{Connected: true} }
-
-func TestDiscoveryUsesPortableNameAndAdminPort(t *testing.T) {
-	configured := &store.Printer{Name: "仓库标签", Slug: "warehouse", Uuid: "12345678-abcd"}
-	if got := advertisedName(configured); got != "PUQU warehouse (123456)" {
-		t.Fatalf("advertised name = %q", got)
-	}
-	if got := advertisedHTTPURL("127.0.0.1:18080"); !strings.HasSuffix(got, ":18080/") {
-		t.Fatalf("admin URL = %q", got)
-	}
-}
 
 type fakeFleet struct {
 	mu   sync.Mutex
@@ -78,7 +67,7 @@ func TestGatewayIsolatesPrinterQueuesAndJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	fleet := &fakeFleet{jobs: make(map[int64][]printer.Job)}
-	gateway := NewGateway(st, fleet, ":8631", "127.0.0.1:8080", nil)
+	gateway := NewGateway(st, fleet, nil)
 	gateway.mu.Lock()
 	gateway.root = ctx
 	gateway.mu.Unlock()
@@ -222,8 +211,34 @@ func TestGetPrinterAttributes(t *testing.T) {
 	if !containsString(response.Printer, "document-format-supported", raster.FormatJPEG) {
 		t.Fatal("JPEG format is not advertised")
 	}
+	if containsString(response.Printer, "document-format-supported", "image/urf") {
+		t.Fatal("URF raster format should not be advertised")
+	}
 	if value, ok := integerFrom(response.Printer, "printer-state"); !ok || value != 3 {
 		t.Fatalf("printer-state = %d, ok=%v", value, ok)
+	}
+}
+
+func TestRejectsURFRaster(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	srv, _ := newTestServer(t, ctx, st, &fakePrinter{})
+	httpServer := httptest.NewServer(srv.Handler())
+	defer httpServer.Close()
+	request := baseRequest(goipp.OpValidateJob, 10)
+	request.Operation.Add(goipp.MakeAttr("printer-uri", goipp.TagURI, goipp.String("ipp://localhost/ipp/print")))
+	request.Operation.Add(goipp.MakeAttr("document-format", goipp.TagMimeType, goipp.String("image/urf")))
+	encoded, err := request.EncodeBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := postIPP(t, httpServer.URL+"/ipp/print", encoded)
+	if goipp.Status(response.Code) != goipp.StatusErrorDocumentFormatNotSupported {
+		t.Fatalf("status = %s", goipp.Status(response.Code))
 	}
 }
 func TestRejectsZeroRequestID(t *testing.T) {
@@ -245,34 +260,6 @@ func TestRejectsZeroRequestID(t *testing.T) {
 	response := postIPP(t, httpServer.URL+"/ipp/print", encoded)
 	if goipp.Status(response.Code) != goipp.StatusErrorBadRequest {
 		t.Fatalf("status = %s", goipp.Status(response.Code))
-	}
-}
-func TestAirPrintAttributesCanBeEnabled(t *testing.T) {
-	ctx := context.Background()
-	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	srv, configured := newTestServer(t, ctx, st, &fakePrinter{})
-	if _, err := st.UpdatePrinter(ctx, configured.ID, store.PrinterInput{
-		Name: configured.Name, Driver: configured.Driver, ProfileID: configured.ProfileID,
-		Enabled: true, Advertise: true, AirPrint: true,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	httpServer := httptest.NewServer(srv.Handler())
-	defer httpServer.Close()
-	request := baseRequest(goipp.OpGetPrinterAttributes, 11)
-	request.Operation.Add(goipp.MakeAttr("printer-uri", goipp.TagURI, goipp.String("ipp://localhost/ipp/print")))
-	encoded, err := request.EncodeBytes()
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := postIPP(t, httpServer.URL+"/ipp/print", encoded)
-	if !containsString(response.Printer, "document-format-supported", raster.FormatApple) ||
-		!containsString(response.Printer, "urf-supported", "RS203") {
-		t.Fatal("AirPrint attributes are not advertised")
 	}
 }
 

@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"path/filepath"
 	"testing"
+
+	"github.com/pressly/goose/v3"
 )
 
 func TestStorePersistsPrinterDeviceAndAbortsInterruptedJobs(t *testing.T) {
@@ -25,7 +28,7 @@ func TestStorePersistsPrinterDeviceAndAbortsInterruptedJobs(t *testing.T) {
 	}
 	configured, err := s.UpdatePrinter(ctx, printers[0].ID, PrinterInput{
 		Name: printers[0].Name, Driver: printers[0].Driver, DeviceID: device.ID, ProfileID: printers[0].ProfileID,
-		Enabled: true, Advertise: true, AirPrint: true,
+		Enabled: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -58,6 +61,39 @@ func TestStorePersistsPrinterDeviceAndAbortsInterruptedJobs(t *testing.T) {
 	}
 	if persisted.PrinterID != configured.ID || persisted.State != "aborted" || !persisted.Error.Valid {
 		t.Fatalf("job = %+v", persisted)
+	}
+}
+
+func TestMigrationRemovesDiscoveryColumnsWithoutLosingPrinter(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "puqu.db")
+	db, err := sql.Open("sqlite3", "file:"+filepath.ToSlash(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	goose.SetBaseFS(migrations)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, "migrations", 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	printers, err := s.Printers(ctx)
+	if err != nil || len(printers) != 1 {
+		t.Fatalf("printers = %+v, %v", printers, err)
+	}
+	var obsolete int64
+	if err := s.db.QueryRowContext(ctx, "SELECT advertise FROM printers LIMIT 1").Scan(&obsolete); err == nil {
+		t.Fatal("obsolete discovery columns still exist")
 	}
 }
 

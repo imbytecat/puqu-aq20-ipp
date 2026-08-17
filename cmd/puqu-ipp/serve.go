@@ -35,22 +35,35 @@ func serveCmd() *cobra.Command {
 func runServe(cmd *cobra.Command) error {
 	ctx, stop := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	dataPath, _ := cmd.Flags().GetString("data")
-	return runDaemon(ctx, dataPath, commandConfig(cmd))
+	runtimeConfig, err := commandConfig(cmd)
+	if err != nil {
+		return err
+	}
+	return runDaemon(ctx, runtimeConfig)
 }
 
-func commandConfig(cmd *cobra.Command) config.Config {
-	ippListen, _ := cmd.Flags().GetString("ipp-listen")
-	adminListen, _ := cmd.Flags().GetString("admin-listen")
-	return config.Config{IPPListen: ippListen, AdminListen: adminListen}
+func commandConfig(cmd *cobra.Command) (config.Config, error) {
+	configFile, _ := cmd.Flags().GetString("config")
+	return config.Load(config.LoadOptions{
+		Path:        configFile,
+		RequireFile: cmd.Flags().Changed("config"),
+		Flags:       cmd.Flags(),
+	})
 }
 
-func runDaemon(ctx context.Context, dataPath string, runtimeConfig config.Config) error {
+func runDaemon(ctx context.Context, runtimeConfig config.Config) error {
 	if err := runtimeConfig.Validate(); err != nil {
 		return err
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	st, err := store.Open(ctx, dataPath)
+	if runtimeConfig.DataPath == "" {
+		dataPath, err := store.DefaultPath()
+		if err != nil {
+			return err
+		}
+		runtimeConfig.DataPath = dataPath
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: runtimeConfig.SlogLevel()}))
+	st, err := store.Open(ctx, runtimeConfig.DataPath)
 	if err != nil {
 		return err
 	}
@@ -65,7 +78,7 @@ func runDaemon(ctx context.Context, dataPath string, runtimeConfig config.Config
 		ble.Shutdown()
 	}()
 
-	ipp := ippserver.NewGateway(st, printerFleet, runtimeConfig.IPPListen, runtimeConfig.AdminListen, logger)
+	ipp := ippserver.NewGateway(st, printerFleet, logger)
 	if err := ipp.Start(ctx); err != nil {
 		return err
 	}
@@ -87,7 +100,7 @@ func runDaemon(ctx context.Context, dataPath string, runtimeConfig config.Config
 	errCh := make(chan error, 2)
 	go func() { errCh <- serveHTTP(ippHTTP, ippListener) }()
 	go func() { errCh <- serveHTTP(adminHTTP, adminListener) }()
-	logger.Info("PUQU IPP bridge started", "ipp", runtimeConfig.IPPListen, "admin", "http://"+runtimeConfig.AdminListen)
+	logger.Info("PUQU IPP bridge started", "ipp", runtimeConfig.IPPListen, "admin", "http://"+runtimeConfig.AdminListen, "config", runtimeConfig.ConfigFile, "database", runtimeConfig.DataPath)
 
 	select {
 	case <-ctx.Done():

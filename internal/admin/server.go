@@ -160,8 +160,6 @@ type printerInput struct {
 	DeviceID  *int64 `json:"deviceId"`
 	ProfileID int64  `json:"profileId"`
 	Enabled   bool   `json:"enabled"`
-	Advertise bool   `json:"advertise"`
-	AirPrint  bool   `json:"airPrint"`
 }
 
 func (input printerInput) storeInput() store.PrinterInput {
@@ -171,7 +169,7 @@ func (input printerInput) storeInput() store.PrinterInput {
 	}
 	return store.PrinterInput{
 		Name: input.Name, Slug: input.Slug, Driver: input.Driver, DeviceID: deviceID,
-		ProfileID: input.ProfileID, Enabled: input.Enabled, Advertise: input.Advertise, AirPrint: input.AirPrint,
+		ProfileID: input.ProfileID, Enabled: input.Enabled,
 	}
 }
 
@@ -326,7 +324,6 @@ func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
-	s.ipp.ReloadDiscovery()
 	writeJSON(w, http.StatusOK, toProfile(profile))
 }
 
@@ -446,8 +443,6 @@ type printerDTO struct {
 	DeviceID   *int64         `json:"deviceId"`
 	ProfileID  int64          `json:"profileId"`
 	Enabled    bool           `json:"enabled"`
-	Advertise  bool           `json:"advertise"`
-	AirPrint   bool           `json:"airPrint"`
 	Status     printer.Status `json:"status"`
 	QueueDepth int            `json:"queueDepth"`
 	UpdatedAt  int64          `json:"updatedAt"`
@@ -502,7 +497,6 @@ func (s *Server) toPrinter(value *store.Printer) printerDTO {
 	return printerDTO{
 		ID: value.ID, Name: value.Name, Slug: value.Slug, UUID: value.Uuid, Driver: value.Driver,
 		DeviceID: nullInt64(value.DeviceID), ProfileID: value.ProfileID, Enabled: value.Enabled == 1,
-		Advertise: value.Advertise == 1, AirPrint: value.Airprint == 1,
 		Status: s.fleet.Status(value.ID), QueueDepth: s.ipp.QueueDepth(value.ID), UpdatedAt: value.UpdatedAt,
 	}
 }

@@ -1,4 +1,4 @@
-// Package ipp exposes the BLE printer through IPP Everywhere operations.
+// Package ipp exposes the BLE printer through direct IPP operations.
 package ipp
 
 import (
@@ -373,7 +373,7 @@ func (s *Server) jobTemplate(ctx context.Context, request *goipp.Message) (strin
 	if err != nil || target.Enabled != 1 {
 		return "", 0, nil, goipp.StatusErrorNotAcceptingJobs, "printer is unavailable"
 	}
-	if format != raster.FormatPWG && format != raster.FormatJPEG && !(format == raster.FormatApple && target.Airprint == 1) {
+	if format != raster.FormatPWG && format != raster.FormatJPEG {
 		return "", 0, nil, goipp.StatusErrorDocumentFormatNotSupported, "document format not supported"
 	}
 	copies := 1

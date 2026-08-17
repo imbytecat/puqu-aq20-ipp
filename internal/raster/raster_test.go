@@ -29,24 +29,6 @@ func TestDecodePWGBilevel(t *testing.T) {
 	}
 }
 
-func TestDecodeAppleGrayscale(t *testing.T) {
-	data := []byte("UNIRAST\x00\x00\x00\x00\x01")
-	header := make([]byte, 32)
-	header[0] = 8 // bits per pixel
-	header[1] = 0 // sGray
-	binary.BigEndian.PutUint32(header[12:16], 8)
-	binary.BigEndian.PutUint32(header[16:20], 1)
-	binary.BigEndian.PutUint32(header[20:24], 203)
-	data = append(data, header...)
-	data = append(data, 0x00, 0xf9, 0, 255, 0, 255, 0, 255, 0, 255)
-	jobs, err := Decode(bytes.NewReader(data), FormatApple, Profile{WidthUM: 1000, HeightUM: 125})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(jobs[0].Data, []byte{0xaa}) {
-		t.Fatalf("bitmap = % x, want aa", jobs[0].Data)
-	}
-}
 func TestDecodeJPEG(t *testing.T) {
 	source := image.NewGray(image.Rect(0, 0, 8, 1))
 	for x := range 8 {

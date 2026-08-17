@@ -12,9 +12,9 @@ import (
 
 const createPrinter = `-- name: CreatePrinter :one
 INSERT INTO printers (
-    name, slug, uuid, driver, device_id, profile_id, enabled, advertise, airprint, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-RETURNING id, name, slug, uuid, driver, device_id, profile_id, enabled, advertise, airprint, created_at, updated_at
+    name, slug, uuid, driver, device_id, profile_id, enabled, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, name, slug, uuid, driver, device_id, profile_id, enabled, created_at, updated_at
 `
 
 type CreatePrinterParams struct {
@@ -25,8 +25,6 @@ type CreatePrinterParams struct {
 	DeviceID  sql.NullInt64 `json:"device_id"`
 	ProfileID int64         `json:"profile_id"`
 	Enabled   int64         `json:"enabled"`
-	Advertise int64         `json:"advertise"`
-	Airprint  int64         `json:"airprint"`
 	CreatedAt int64         `json:"created_at"`
 	UpdatedAt int64         `json:"updated_at"`
 }
@@ -40,8 +38,6 @@ func (q *Queries) CreatePrinter(ctx context.Context, arg CreatePrinterParams) (*
 		arg.DeviceID,
 		arg.ProfileID,
 		arg.Enabled,
-		arg.Advertise,
-		arg.Airprint,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -55,8 +51,6 @@ func (q *Queries) CreatePrinter(ctx context.Context, arg CreatePrinterParams) (*
 		&i.DeviceID,
 		&i.ProfileID,
 		&i.Enabled,
-		&i.Advertise,
-		&i.Airprint,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -76,7 +70,7 @@ func (q *Queries) DeletePrinter(ctx context.Context, id int64) (int64, error) {
 }
 
 const getPrinter = `-- name: GetPrinter :one
-SELECT id, name, slug, uuid, driver, device_id, profile_id, enabled, advertise, airprint, created_at, updated_at FROM printers WHERE id = ?
+SELECT id, name, slug, uuid, driver, device_id, profile_id, enabled, created_at, updated_at FROM printers WHERE id = ?
 `
 
 func (q *Queries) GetPrinter(ctx context.Context, id int64) (*Printer, error) {
@@ -91,8 +85,6 @@ func (q *Queries) GetPrinter(ctx context.Context, id int64) (*Printer, error) {
 		&i.DeviceID,
 		&i.ProfileID,
 		&i.Enabled,
-		&i.Advertise,
-		&i.Airprint,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -100,7 +92,7 @@ func (q *Queries) GetPrinter(ctx context.Context, id int64) (*Printer, error) {
 }
 
 const getPrinterBySlug = `-- name: GetPrinterBySlug :one
-SELECT id, name, slug, uuid, driver, device_id, profile_id, enabled, advertise, airprint, created_at, updated_at FROM printers WHERE slug = ?
+SELECT id, name, slug, uuid, driver, device_id, profile_id, enabled, created_at, updated_at FROM printers WHERE slug = ?
 `
 
 func (q *Queries) GetPrinterBySlug(ctx context.Context, slug string) (*Printer, error) {
@@ -115,8 +107,6 @@ func (q *Queries) GetPrinterBySlug(ctx context.Context, slug string) (*Printer, 
 		&i.DeviceID,
 		&i.ProfileID,
 		&i.Enabled,
-		&i.Advertise,
-		&i.Airprint,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -124,7 +114,7 @@ func (q *Queries) GetPrinterBySlug(ctx context.Context, slug string) (*Printer, 
 }
 
 const listPrinters = `-- name: ListPrinters :many
-SELECT id, name, slug, uuid, driver, device_id, profile_id, enabled, advertise, airprint, created_at, updated_at FROM printers ORDER BY name ASC, id ASC
+SELECT id, name, slug, uuid, driver, device_id, profile_id, enabled, created_at, updated_at FROM printers ORDER BY name ASC, id ASC
 `
 
 func (q *Queries) ListPrinters(ctx context.Context) ([]*Printer, error) {
@@ -145,8 +135,6 @@ func (q *Queries) ListPrinters(ctx context.Context) ([]*Printer, error) {
 			&i.DeviceID,
 			&i.ProfileID,
 			&i.Enabled,
-			&i.Advertise,
-			&i.Airprint,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -165,9 +153,9 @@ func (q *Queries) ListPrinters(ctx context.Context) ([]*Printer, error) {
 
 const updatePrinter = `-- name: UpdatePrinter :one
 UPDATE printers
-SET name = ?, driver = ?, device_id = ?, profile_id = ?, enabled = ?, advertise = ?, airprint = ?, updated_at = ?
+SET name = ?, driver = ?, device_id = ?, profile_id = ?, enabled = ?, updated_at = ?
 WHERE id = ?
-RETURNING id, name, slug, uuid, driver, device_id, profile_id, enabled, advertise, airprint, created_at, updated_at
+RETURNING id, name, slug, uuid, driver, device_id, profile_id, enabled, created_at, updated_at
 `
 
 type UpdatePrinterParams struct {
@@ -176,8 +164,6 @@ type UpdatePrinterParams struct {
 	DeviceID  sql.NullInt64 `json:"device_id"`
 	ProfileID int64         `json:"profile_id"`
 	Enabled   int64         `json:"enabled"`
-	Advertise int64         `json:"advertise"`
-	Airprint  int64         `json:"airprint"`
 	UpdatedAt int64         `json:"updated_at"`
 	ID        int64         `json:"id"`
 }
@@ -189,8 +175,6 @@ func (q *Queries) UpdatePrinter(ctx context.Context, arg UpdatePrinterParams) (*
 		arg.DeviceID,
 		arg.ProfileID,
 		arg.Enabled,
-		arg.Advertise,
-		arg.Airprint,
 		arg.UpdatedAt,
 		arg.ID,
 	)
@@ -204,8 +188,6 @@ func (q *Queries) UpdatePrinter(ctx context.Context, arg UpdatePrinterParams) (*
 		&i.DeviceID,
 		&i.ProfileID,
 		&i.Enabled,
-		&i.Advertise,
-		&i.Airprint,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

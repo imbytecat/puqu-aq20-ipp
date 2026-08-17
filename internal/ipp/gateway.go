@@ -35,35 +35,27 @@ type queueRuntime struct {
 }
 
 type Gateway struct {
-	store     *store.Store
-	fleet     PrinterFleet
-	logger    *slog.Logger
-	discovery *discovery
+	store  *store.Store
+	fleet  PrinterFleet
+	logger *slog.Logger
 
 	mu     sync.RWMutex
 	root   context.Context
 	queues map[int64]*queueRuntime
 }
 
-func NewGateway(st *store.Store, fleet PrinterFleet, ippListen, adminListen string, logger *slog.Logger) *Gateway {
+func NewGateway(st *store.Store, fleet PrinterFleet, logger *slog.Logger) *Gateway {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Gateway{
-		store: st, fleet: fleet, logger: logger, discovery: newDiscovery(st, logger, ippListen, adminListen),
-		queues: make(map[int64]*queueRuntime),
-	}
+	return &Gateway{store: st, fleet: fleet, logger: logger, queues: make(map[int64]*queueRuntime)}
 }
 
 func (g *Gateway) Start(ctx context.Context) error {
 	g.mu.Lock()
 	g.root = ctx
 	g.mu.Unlock()
-	if err := g.Reload(ctx); err != nil {
-		return err
-	}
-	go g.discovery.Run(ctx)
-	return nil
+	return g.Reload(ctx)
 }
 
 func (g *Gateway) Reload(ctx context.Context) error {
@@ -100,7 +92,6 @@ func (g *Gateway) Reload(ctx context.Context) error {
 		}
 	}
 	g.queues = next
-	g.discovery.Reload()
 	return nil
 }
 
@@ -162,5 +153,3 @@ func (g *Gateway) Cancel(ctx context.Context, id int64) error {
 	}
 	return runtime.server.Cancel(ctx, id)
 }
-
-func (g *Gateway) ReloadDiscovery() { g.discovery.Reload() }
