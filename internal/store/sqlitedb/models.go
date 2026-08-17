@@ -8,17 +8,6 @@ import (
 	"database/sql"
 )
 
-type AppSetting struct {
-	ID          int64  `json:"id"`
-	IppName     string `json:"ipp_name"`
-	PrinterUuid string `json:"printer_uuid"`
-	IppListen   string `json:"ipp_listen"`
-	AdminListen string `json:"admin_listen"`
-	Advertise   int64  `json:"advertise"`
-	Airprint    int64  `json:"airprint"`
-	UpdatedAt   int64  `json:"updated_at"`
-}
-
 type BleDevice struct {
 	ID         int64          `json:"id"`
 	NativeID   string         `json:"native_id"`
@@ -26,7 +15,6 @@ type BleDevice struct {
 	Address    string         `json:"address"`
 	WriteUuid  string         `json:"write_uuid"`
 	NotifyUuid sql.NullString `json:"notify_uuid"`
-	Selected   int64          `json:"selected"`
 	LastSeenAt int64          `json:"last_seen_at"`
 	UpdatedAt  int64          `json:"updated_at"`
 }
@@ -40,13 +28,13 @@ type LabelProfile struct {
 	PaperType int64  `json:"paper_type"`
 	Darkness  int64  `json:"darkness"`
 	Speed     int64  `json:"speed"`
-	Active    int64  `json:"active"`
 	CreatedAt int64  `json:"created_at"`
 	UpdatedAt int64  `json:"updated_at"`
 }
 
 type PrintJob struct {
 	ID             int64          `json:"id"`
+	PrinterID      int64          `json:"printer_id"`
 	Name           string         `json:"name"`
 	UserName       string         `json:"user_name"`
 	State          string         `json:"state"`
@@ -57,4 +45,19 @@ type PrintJob struct {
 	CreatedAt      int64          `json:"created_at"`
 	StartedAt      sql.NullInt64  `json:"started_at"`
 	CompletedAt    sql.NullInt64  `json:"completed_at"`
+}
+
+type Printer struct {
+	ID        int64         `json:"id"`
+	Name      string        `json:"name"`
+	Slug      string        `json:"slug"`
+	Uuid      string        `json:"uuid"`
+	Driver    string        `json:"driver"`
+	DeviceID  sql.NullInt64 `json:"device_id"`
+	ProfileID int64         `json:"profile_id"`
+	Enabled   int64         `json:"enabled"`
+	Advertise int64         `json:"advertise"`
+	Airprint  int64         `json:"airprint"`
+	CreatedAt int64         `json:"created_at"`
+	UpdatedAt int64         `json:"updated_at"`
 }

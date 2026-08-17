@@ -1,63 +1,65 @@
 # AGENTS.md
 
-Cross-platform daemon exposing PUQU AQ20 BLE label printers as driverless IPP printers. One Go binary owns Bluetooth, IPP, DNS-SD, SQLite, queueing, and an embedded local-only React administration UI.
+Cross-platform daemon exposing multiple PUQU AQ20-compatible BLE label printers as driverless IPP printers. One Go binary owns Bluetooth, IPP, DNS-SD, SQLite, per-printer queues, and an embedded local React administration UI.
 
 ## Architecture
 
-- `cmd/puqu-ipp/` — cobra CLI: default/`serve`, BLE diagnostics, hardware test print, and native service management through `kardianos/service`.
-- `internal/ipp/` — IPP delivery module, persistent job state, in-memory document queue, DNS-SD, printer/job attributes, and read-only network printer page.
-- `internal/raster/` — pure PWG Raster, Apple Raster, and JPEG decoding to PUQU-ready 1bpp bitmaps. Exact 203 dpi profile dimensions only; never scale silently.
-- `internal/printer/` — single active BLE printer, reconnect loop, serialized print/cancel flow.
-- `internal/ble/` — device-agnostic tinygo Bluetooth central. Native BlueZ/CoreBluetooth/WinRT; no raw HCI.
+- `cmd/puqu-ipp/` — cobra CLI, bootstrap flags/env, diagnostics, hardware test print, native service management.
+- `internal/config/` — process bootstrap config. Listen addresses live here, not SQLite.
+- `internal/fleet/` — configured printer runtimes and driver registry. One `printer.Manager` per enabled logical printer.
+- `internal/ipp/` — IPP gateway routing `/ipp/<slug>` to isolated queues plus per-printer DNS-SD records.
+- `internal/raster/` — pure PWG Raster, Apple Raster, and JPEG decoding. Exact 203 dpi profile dimensions; no silent scaling.
+- `internal/printer/` — one physical printer connection, reconnect loop, serialized print/cancel flow.
+- `internal/ble/` — device-agnostic native BlueZ/CoreBluetooth/WinRT central. Adapter scans serialize; connections coexist.
 - `internal/puqu/` — pure reverse-engineered PUQU wire protocol.
-- `internal/store/` — SQLite through `ncruces/go-sqlite3`, goose migrations, sqlc queries. Configuration and job history persist; interrupted active jobs become aborted on startup.
-- `internal/admin/` — local JSON administration interface. No IPP logic.
-- `web/` — small React 19 configuration UI. No label editor and no browser printing path.
-- `internal/web/` — build-tag-gated embedded SPA. `web:build` writes `internal/web/dist`; only `-tags embed` includes it.
+- `internal/store/` — SQLite business state through ncruces/go-sqlite3, goose, and sqlc.
+- `internal/admin/` — local JSON management interface. No IPP protocol logic.
+- `web/` — React 19, TanStack Router/Query, Tailwind CSS v4 via `@tailwindcss/vite`.
+- `internal/web/` — build-tag-gated embedded SPA.
 
-Dependencies point inward: delivery modules (`admin`, `ipp`, `cmd`) call `store`, `printer`, and `raster`; `printer` calls `ble` and `puqu`; pure protocol/raster modules know nothing about transports or storage.
+Dependencies point inward: delivery modules call `fleet`, `store`, `printer`, and `raster`; `fleet` owns printer managers; `printer` calls `ble` and `puqu`.
 
 ## Invariants
 
-- System clients print through IPP; browser never submits labels.
-- One active BLE connection and one serialized hardware print flow.
-- Active label profile defines exact media dimensions and PUQU settings.
-- IPP accepts PWG Raster and JPEG; Apple Raster only when AirPrint is enabled.
-- DNS-SD always advertises `_ipp._tcp,_print`; AirPrint additionally advertises `_universal` and URF.
-- Admin listener defaults to loopback. IPP listener is unauthenticated; document trusted-LAN exposure clearly.
-- Request documents are bounded at 16 MiB and queue capacity at 32.
-- Service restart aborts uncertain pending/processing jobs; never replay unknown hardware state.
-- Configuration updates validate loopback-only admin addresses before persistence.
+- A logical printer has one stable slug/UUID, one driver, zero or one device, and one label profile.
+- A physical device belongs to at most one printer. Profiles may be shared.
+- Each printer has an isolated ordered queue; different printers may print concurrently.
+- Jobs belong to exactly one printer and never move between queues.
+- IPP accepts PWG Raster/JPEG; Apple Raster only when that printer enables AirPrint.
+- DNS-SD publishes one record per enabled advertised printer.
+- Bootstrap config uses CLI/env: `--ipp-listen`, `--admin-listen`, `PUQU_IPP_LISTEN`, `PUQU_ADMIN_LISTEN`. Admin listen stays loopback-only.
+- SQLite stores business state and job history, never listener addresses.
+- Documents are bounded at 16 MiB; each printer queue capacity is 32.
+- Restart aborts uncertain pending/processing jobs; never replay unknown hardware state.
 
 ## Commands
 
 ```bash
 mise install
-mise run setup            # pnpm install --frozen-lockfile
-mise run dev              # Go daemon + Vite
-mise run build            # embedded production binary: bin/puqu-ipp
-mise run test             # go test ./...
-mise run vet              # go vet ./...
+mise run setup
+mise run dev
+mise run build
+mise run test
+mise run vet
 mise run web:typecheck
 mise run ci
-mise run sqlc             # regenerate internal/store/sqlitedb
+mise run sqlc
 ```
 
 Hardware commands: `mise run discover`, `mise run print`, `mise run smoke`.
 
 ## Conventions
 
-- Go: `gofmt`; minimal comments for protocol and non-obvious lifecycle behavior only.
-- TypeScript: strict mode, no extra state library, native fetch and semantic HTML.
-- Tests live beside code and run without hardware. Printer tests use fake links/printers; IPP tests submit real encoded IPP messages through `httptest`.
-- SQL source lives in `internal/store/queries/`; generated `internal/store/sqlitedb/` changes with it.
-- New schema changes require a new numbered goose migration; never rewrite a migration already shipped.
-- Exported symbol changes require all callers updated in the same cutover; no compatibility shims.
-- Do not reintroduce the removed `apps/` browser-editor architecture, gin/SSE/TanStack/Fabric dependencies, Moon/Proto, or browser-localStorage configuration.
+- Go: gofmt; comments only for protocol and non-obvious lifecycle behavior.
+- TypeScript: strict mode, TanStack Query owns server state, TanStack Router owns navigation, Tailwind v4 owns UI styling.
+- Tests run without hardware. IPP tests submit encoded messages through `httptest`; fleet boundaries use fakes.
+- SQL source lives in `internal/store/queries/`; regenerate `internal/store/sqlitedb/` with query changes.
+- Shipped schema changes get a new numbered goose migration. During an unshipped migration branch, keep its up/down path internally consistent.
+- Exported symbol changes migrate every caller in one cutover; no compatibility shims.
 
 ## Verification
 
-- IPP behavior: targeted Go tests plus CUPS `ipptool` when changing attributes/operations.
-- DNS-SD: browse `_print._sub._ipp._tcp` and, when enabled, `_universal._sub._ipp._tcp`.
-- UI: build/typecheck, then exercise the changed flow in a browser.
-- BLE/hardware behavior: use `discover`, `print`, or `smoke`; do not claim macOS/Windows/iOS hardware validation without running it there.
+- IPP: targeted Go tests; CUPS `ipptool` for operation/attribute changes.
+- DNS-SD: browse `_print._sub._ipp._tcp` and `_universal._sub._ipp._tcp` when enabled.
+- UI: typecheck/build, then exercise changed routes in a browser at desktop and mobile widths.
+- BLE/hardware: use `discover`, `print`, or `smoke`; state untested platforms and hardware explicitly.

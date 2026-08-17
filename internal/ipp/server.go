@@ -53,18 +53,18 @@ type Printer interface {
 }
 
 type Server struct {
-	store   *store.Store
-	printer Printer
-	logger  *slog.Logger
-	started time.Time
-	queue   chan queuedJob
+	store     *store.Store
+	printer   Printer
+	printerID int64
+	slug      string
+	logger    *slog.Logger
+	started   time.Time
+	queue     chan queuedJob
 
 	mu       sync.Mutex
 	current  int64
 	cancel   context.CancelFunc
 	openJobs map[int64]*queuedJob
-
-	discovery *discovery
 }
 
 type queuedJob struct {
@@ -76,27 +76,23 @@ type queuedJob struct {
 	settings printer.Settings
 }
 
-func New(st *store.Store, device Printer, logger *slog.Logger) *Server {
+func New(st *store.Store, device Printer, printerID int64, slug string, logger *slog.Logger) *Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Server{
-		store: st, printer: device, logger: logger, started: time.Now(),
+		store: st, printer: device, printerID: printerID, slug: slug, logger: logger, started: time.Now(),
 		queue: make(chan queuedJob, queueCapacity), openJobs: map[int64]*queuedJob{},
-		discovery: newDiscovery(st, logger),
 	}
 }
 
 func (s *Server) Start(ctx context.Context) {
 	go s.worker(ctx)
-	go s.discovery.Run(ctx)
 }
-
-func (s *Server) ReloadDiscovery() { s.discovery.Reload() }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /ipp/print", s.handle)
+	mux.HandleFunc("POST /ipp/{printer}", s.handle)
 	mux.HandleFunc("GET /icon.svg", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
@@ -112,6 +108,13 @@ func (s *Server) Handler() http.Handler {
 func (s *Server) QueueDepth() int { return len(s.queue) }
 
 func (s *Server) Cancel(ctx context.Context, id int64) error {
+	job, err := s.store.Job(ctx, id)
+	if err != nil {
+		return err
+	}
+	if job.PrinterID != s.printerID {
+		return sql.ErrNoRows
+	}
 	s.mu.Lock()
 	if open := s.openJobs[id]; open != nil {
 		delete(s.openJobs, id)
@@ -257,7 +260,8 @@ func (s *Server) printJob(ctx context.Context, request *goipp.Message, document 
 		return response(request, goipp.StatusErrorRequestEntity, "document is empty or too large")
 	}
 	job, err := s.store.CreateJob(ctx, store.JobInput{
-		Name: stringAttr(request, "job-name", "Untitled"), UserName: stringAttr(request, "requesting-user-name", "unknown"),
+		PrinterID: s.printerID, Name: stringAttr(request, "job-name", "Untitled"),
+		UserName:       stringAttr(request, "requesting-user-name", "unknown"),
 		DocumentFormat: format, Copies: int64(copies), Bytes: int64(len(data)),
 	})
 	if err != nil {
@@ -277,7 +281,8 @@ func (s *Server) createJob(ctx context.Context, request *goipp.Message, host str
 		return response(request, status, message)
 	}
 	job, err := s.store.CreateJob(ctx, store.JobInput{
-		Name: stringAttr(request, "job-name", "Untitled"), UserName: stringAttr(request, "requesting-user-name", "unknown"),
+		PrinterID: s.printerID, Name: stringAttr(request, "job-name", "Untitled"),
+		UserName:       stringAttr(request, "requesting-user-name", "unknown"),
 		DocumentFormat: format, Copies: int64(copies), Bytes: 0,
 	})
 	if err != nil {
@@ -364,11 +369,11 @@ func (s *Server) closeJob(ctx context.Context, request *goipp.Message, host stri
 
 func (s *Server) jobTemplate(ctx context.Context, request *goipp.Message) (string, int, *store.Profile, goipp.Status, string) {
 	format := stringAttr(request, "document-format", raster.FormatPWG)
-	settings, err := s.store.Settings(ctx)
-	if err != nil {
-		return "", 0, nil, goipp.StatusErrorInternal, err.Error()
+	target, err := s.store.Printer(ctx, s.printerID)
+	if err != nil || target.Enabled != 1 {
+		return "", 0, nil, goipp.StatusErrorNotAcceptingJobs, "printer is unavailable"
 	}
-	if format != raster.FormatPWG && format != raster.FormatJPEG && !(format == raster.FormatApple && settings.Airprint == 1) {
+	if format != raster.FormatPWG && format != raster.FormatJPEG && !(format == raster.FormatApple && target.Airprint == 1) {
 		return "", 0, nil, goipp.StatusErrorDocumentFormatNotSupported, "document format not supported"
 	}
 	copies := 1
@@ -384,9 +389,9 @@ func (s *Server) jobTemplate(ctx context.Context, request *goipp.Message) (strin
 	if color := stringAttr(request, "print-color-mode", "monochrome"); color != "monochrome" && color != "auto" {
 		return "", 0, nil, goipp.StatusErrorAttributesOrValues, "only monochrome printing is supported"
 	}
-	profile, err := s.store.ActiveProfile(ctx)
+	profile, err := s.store.Profile(ctx, target.ProfileID)
 	if err != nil {
-		return "", 0, nil, goipp.StatusErrorNotAcceptingJobs, "no active label profile"
+		return "", 0, nil, goipp.StatusErrorNotAcceptingJobs, "label profile is unavailable"
 	}
 	if media := stringAttr(request, "media", ""); media != "" && media != mediaName(profile) {
 		return "", 0, nil, goipp.StatusErrorAttributesOrValues, "requested media is not loaded"
@@ -482,27 +487,35 @@ func (s *Server) getJobAttributes(ctx context.Context, request *goipp.Message, h
 		return response(request, goipp.StatusErrorBadRequest, "job target is required")
 	}
 	job, err := s.store.Job(ctx, int64(id))
-	if errors.Is(err, sql.ErrNoRows) {
+	if errors.Is(err, sql.ErrNoRows) || err == nil && job.PrinterID != s.printerID {
 		return response(request, goipp.StatusErrorNotFound, "job not found")
 	}
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
-	profile, err := s.store.ActiveProfile(ctx)
+	target, err := s.store.Printer(ctx, s.printerID)
+	if err != nil {
+		return response(request, goipp.StatusErrorInternal, err.Error())
+	}
+	profile, err := s.store.Profile(ctx, target.ProfileID)
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
 	reply := response(request, goipp.StatusOk, "")
-	reply.Job = filterJobAttributes(request, jobAttributes(job, printerURI(host), mediaName(profile), s.started), false)
+	reply.Job = filterJobAttributes(request, jobAttributes(job, printerURI(host, s.slug), mediaName(profile), s.started), false)
 	return reply
 }
 
 func (s *Server) getJobs(ctx context.Context, request *goipp.Message, host string) *goipp.Message {
-	jobs, err := s.store.Jobs(ctx, 500)
+	jobs, err := s.store.JobsByPrinter(ctx, s.printerID, 500)
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
-	profile, err := s.store.ActiveProfile(ctx)
+	target, err := s.store.Printer(ctx, s.printerID)
+	if err != nil {
+		return response(request, goipp.StatusErrorInternal, err.Error())
+	}
+	profile, err := s.store.Profile(ctx, target.ProfileID)
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
@@ -521,7 +534,7 @@ func (s *Server) getJobs(ctx context.Context, request *goipp.Message, host strin
 		if !jobMatches(which, job.State) || myJobs && job.UserName != user {
 			continue
 		}
-		attrs := filterJobAttributes(request, jobAttributes(job, printerURI(host), mediaName(profile), s.started), true)
+		attrs := filterJobAttributes(request, jobAttributes(job, printerURI(host, s.slug), mediaName(profile), s.started), true)
 		reply.Groups.Add(goipp.Group{Tag: goipp.TagJobGroup, Attrs: attrs})
 		count++
 	}
@@ -546,7 +559,7 @@ func (s *Server) cancelMyJobs(ctx context.Context, request *goipp.Message) *goip
 	if user == "" {
 		return response(request, goipp.StatusErrorBadRequest, "requesting-user-name is required")
 	}
-	jobs, err := s.store.Jobs(ctx, 500)
+	jobs, err := s.store.JobsByPrinter(ctx, s.printerID, 500)
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
@@ -560,7 +573,7 @@ func (s *Server) cancelMyJobs(ctx context.Context, request *goipp.Message) *goip
 
 func (s *Server) jobResponse(request *goipp.Message, job *store.Job, host, media string) *goipp.Message {
 	reply := response(request, goipp.StatusOk, "")
-	reply.Job = jobAttributes(job, printerURI(host), media, s.started)
+	reply.Job = jobAttributes(job, printerURI(host, s.slug), media, s.started)
 	return reply
 }
 
@@ -685,11 +698,11 @@ func profileToSettings(profile *store.Profile) printer.Settings {
 	return printer.Settings{Darkness: int(profile.Darkness), Speed: int(profile.Speed), PaperType: int(profile.PaperType)}
 }
 
-func printerURI(host string) string {
+func printerURI(host, slug string) string {
 	if host == "" {
 		host = "localhost:8631"
 	}
-	return "ipp://" + host + "/ipp/print"
+	return "ipp://" + host + "/ipp/" + slug
 }
 func httpURI(host, path string) string {
 	if host == "" {

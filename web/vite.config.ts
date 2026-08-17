@@ -1,6 +1,7 @@
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "@tailwindcss/vite";
 
 export default defineConfig({
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
@@ -9,5 +10,5 @@ export default defineConfig({
     outDir: fileURLToPath(new URL("../internal/web/dist", import.meta.url)),
     emptyOutDir: true,
   },
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
 });

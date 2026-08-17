@@ -1,7 +1,7 @@
 -- name: CreateJob :one
 INSERT INTO print_jobs (
-    name, user_name, state, document_format, copies, bytes, error, created_at
-) VALUES (?, ?, 'pending', ?, ?, ?, NULL, ?)
+    printer_id, name, user_name, state, document_format, copies, bytes, error, created_at
+) VALUES (?, ?, ?, 'pending', ?, ?, ?, NULL, ?)
 RETURNING *;
 
 -- name: GetJob :one
@@ -10,8 +10,8 @@ SELECT * FROM print_jobs WHERE id = ?;
 -- name: ListJobs :many
 SELECT * FROM print_jobs ORDER BY id DESC LIMIT ?;
 
--- name: ListJobsByState :many
-SELECT * FROM print_jobs WHERE state = ? ORDER BY id ASC;
+-- name: ListJobsByPrinter :many
+SELECT * FROM print_jobs WHERE printer_id = ? ORDER BY id DESC LIMIT ?;
 
 -- name: StartJob :execrows
 UPDATE print_jobs SET state = 'processing', started_at = ?, error = NULL WHERE id = ? AND state = 'pending';

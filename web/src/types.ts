@@ -1,11 +1,12 @@
-export type Settings = {
-  ippName: string;
-  printerUuid: string;
+export type RuntimeConfig = {
   ippListen: string;
   adminListen: string;
-  advertise: boolean;
-  airPrint: boolean;
-  updatedAt: number;
+};
+
+export type Driver = {
+  id: string;
+  name: string;
+  transport: string;
 };
 
 export type PrinterStatus = {
@@ -13,7 +14,23 @@ export type PrinterStatus = {
   connecting: boolean;
   lastError?: string;
   busy: boolean;
-  info?: { name: string; id: string; address: string; mtu: number };
+  info?: { name: string; id: string; address: string; mtu: number | null };
+};
+
+export type Printer = {
+  id: number;
+  name: string;
+  slug: string;
+  uuid: string;
+  driver: string;
+  deviceId: number | null;
+  profileId: number;
+  enabled: boolean;
+  advertise: boolean;
+  airPrint: boolean;
+  status: PrinterStatus;
+  queueDepth: number;
+  updatedAt: number;
 };
 
 export type Device = {
@@ -23,7 +40,7 @@ export type Device = {
   address: string;
   writeUuid: string;
   notifyUuid: string | null;
-  selected: boolean;
+  assignedPrinterId: number | null;
   lastSeenAt: number;
 };
 
@@ -43,11 +60,11 @@ export type Profile = {
   paperType: number;
   darkness: number;
   speed: number;
-  active: boolean;
 };
 
 export type Job = {
   id: number;
+  printerId: number;
   name: string;
   userName: string;
   state: string;
@@ -56,16 +73,19 @@ export type Job = {
   bytes: number;
   error: string | null;
   createdAt: number;
+  startedAt: number | null;
+  completedAt: number | null;
 };
 
 export type Status = {
   version: string;
-  settings: Settings;
-  printer: PrinterStatus;
+  config: RuntimeConfig;
+  drivers: Driver[];
+  printers: Printer[];
   devices: Device[];
   profiles: Profile[];
   jobs: Job[];
-  queueDepth: number;
 };
 
-export type ProfileInput = Omit<Profile, "id" | "active">;
+export type PrinterInput = Pick<Printer, "name" | "slug" | "driver" | "deviceId" | "profileId" | "enabled" | "advertise" | "airPrint">;
+export type ProfileInput = Omit<Profile, "id">;

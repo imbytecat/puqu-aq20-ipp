@@ -17,13 +17,15 @@ import (
 )
 
 type discovery struct {
-	store  *store.Store
-	logger *slog.Logger
-	reload chan struct{}
+	store       *store.Store
+	logger      *slog.Logger
+	ippListen   string
+	adminListen string
+	reload      chan struct{}
 }
 
-func newDiscovery(st *store.Store, logger *slog.Logger) *discovery {
-	return &discovery{store: st, logger: logger, reload: make(chan struct{}, 1)}
+func newDiscovery(st *store.Store, logger *slog.Logger, ippListen, adminListen string) *discovery {
+	return &discovery{store: st, logger: logger, ippListen: ippListen, adminListen: adminListen, reload: make(chan struct{}, 1)}
 }
 
 func (d *discovery) Reload() {
@@ -35,29 +37,7 @@ func (d *discovery) Reload() {
 
 func (d *discovery) Run(ctx context.Context) {
 	for {
-		settings, err := d.store.Settings(ctx)
-		if err != nil {
-			d.logger.Error("load discovery settings", "error", err)
-			if !wait(ctx, d.reload, 5*time.Second) {
-				return
-			}
-			continue
-		}
-		if settings.Advertise == 0 {
-			if !wait(ctx, d.reload, 0) {
-				return
-			}
-			continue
-		}
-		profile, err := d.store.ActiveProfile(ctx)
-		if err != nil {
-			d.logger.Error("load active profile for discovery", "error", err)
-			if !wait(ctx, d.reload, 5*time.Second) {
-				return
-			}
-			continue
-		}
-		port, err := listenPort(settings.IppListen)
+		port, err := listenPort(d.ippListen)
 		if err != nil {
 			d.logger.Error("invalid IPP listen address", "error", err)
 			if !wait(ctx, d.reload, 5*time.Second) {
@@ -65,30 +45,47 @@ func (d *discovery) Run(ctx context.Context) {
 			}
 			continue
 		}
-
-		formats := raster.FormatPWG + "," + raster.FormatJPEG
-		serviceType := "_ipp._tcp,_print"
-		urf := ""
-		if settings.Airprint == 1 {
-			formats += "," + raster.FormatApple
-			serviceType += ",_universal"
-			urf = "W8,SRGB24,RS203,DM1"
-		}
-		text := []string{
-			"txtvers=1", "qtotal=1", "rp=ipp/print", "ty=PUQU AQ20",
-			"product=(PUQU AQ20 IPP Bridge)", "pdl=" + formats, "Color=F", "Duplex=F", "Copies=T",
-			"UUID=" + settings.PrinterUuid, "note=" + fmtProfile(profile), "adminurl=" + advertisedHTTPURL(settings.IppListen),
-		}
-		if urf != "" {
-			text = append(text, "URF="+urf)
-		}
-		responder, err := zeroconf.Register(advertisedName(settings), serviceType, "local.", port, text, nil)
+		printers, err := d.store.Printers(ctx)
 		if err != nil {
-			d.logger.Error("register DNS-SD printer", "error", err)
+			d.logger.Error("load printers for discovery", "error", err)
 			if !wait(ctx, d.reload, 5*time.Second) {
 				return
 			}
 			continue
+		}
+
+		var responders []*zeroconf.Server
+		for _, configured := range printers {
+			if configured.Enabled != 1 || configured.Advertise != 1 {
+				continue
+			}
+			profile, err := d.store.Profile(ctx, configured.ProfileID)
+			if err != nil {
+				d.logger.Error("load printer profile for discovery", "printer", configured.ID, "error", err)
+				continue
+			}
+			formats := raster.FormatPWG + "," + raster.FormatJPEG
+			serviceType := "_ipp._tcp,_print"
+			urf := ""
+			if configured.Airprint == 1 {
+				formats += "," + raster.FormatApple
+				serviceType += ",_universal"
+				urf = "W8,SRGB24,RS203,DM1"
+			}
+			text := []string{
+				"txtvers=1", "qtotal=1", "rp=ipp/" + configured.Slug, "ty=PUQU AQ20",
+				"product=(PUQU AQ20 IPP Bridge)", "pdl=" + formats, "Color=F", "Duplex=F", "Copies=T",
+				"UUID=" + configured.Uuid, "note=" + fmtProfile(profile), "adminurl=" + advertisedHTTPURL(d.adminListen),
+			}
+			if urf != "" {
+				text = append(text, "URF="+urf)
+			}
+			responder, err := zeroconf.Register(advertisedName(configured), serviceType, "local.", port, text, nil)
+			if err != nil {
+				d.logger.Error("register DNS-SD printer", "printer", configured.ID, "error", err)
+				continue
+			}
+			responders = append(responders, responder)
 		}
 
 		interfaces := interfaceSignature()
@@ -97,7 +94,7 @@ func (d *discovery) Run(ctx context.Context) {
 		for !restart {
 			select {
 			case <-ctx.Done():
-				responder.Shutdown()
+				shutdownResponders(responders)
 				ticker.Stop()
 				return
 			case <-d.reload:
@@ -110,16 +107,29 @@ func (d *discovery) Run(ctx context.Context) {
 			}
 		}
 		ticker.Stop()
+		shutdownResponders(responders)
+	}
+}
+
+func shutdownResponders(responders []*zeroconf.Server) {
+	for _, responder := range responders {
 		responder.Shutdown()
 	}
 }
 
-func advertisedName(settings *store.Settings) string {
-	suffix := settings.PrinterUuid
+func advertisedName(configured *store.Printer) string {
+	name := configured.Name
+	for _, char := range name {
+		if char > 127 {
+			name = "PUQU " + configured.Slug
+			break
+		}
+	}
+	suffix := configured.Uuid
 	if len(suffix) > 6 {
 		suffix = suffix[:6]
 	}
-	return settings.IppName + " (" + suffix + ")"
+	return name + " (" + suffix + ")"
 }
 
 func listenPort(address string) (int, error) {
@@ -132,6 +142,7 @@ func listenPort(address string) (int, error) {
 	}
 	return strconv.Atoi(port)
 }
+
 func advertisedHTTPURL(listen string) string {
 	host, _ := os.Hostname()
 	host = strings.TrimSuffix(host, ".")

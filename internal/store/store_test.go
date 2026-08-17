@@ -6,30 +6,33 @@ import (
 	"testing"
 )
 
-func TestStorePersistsConfigurationAndAbortsInterruptedJobs(t *testing.T) {
+func TestStorePersistsPrinterDeviceAndAbortsInterruptedJobs(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "puqu.db")
 	s, err := Open(ctx, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings, err := s.Settings(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if settings.PrinterUuid == "" || settings.IppListen != ":8631" {
-		t.Fatalf("settings = %+v", settings)
+	printers, err := s.Printers(ctx)
+	if err != nil || len(printers) != 1 || printers[0].Uuid == "" {
+		t.Fatalf("default printers = %+v, %v", printers, err)
 	}
 	device, err := s.SaveDevice(ctx, DeviceInput{
-		NativeID: "dev-1", Name: "Q20-test", Address: "dev-1", WriteUUID: "ae01", NotifyUUID: "ae02", Selected: true,
+		NativeID: "dev-1", Name: "Q20-test", Address: "dev-1", WriteUUID: "ae01", NotifyUUID: "ae02",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if device.Selected != 1 {
-		t.Fatalf("device not selected: %+v", device)
+	configured, err := s.UpdatePrinter(ctx, printers[0].ID, PrinterInput{
+		Name: printers[0].Name, Driver: printers[0].Driver, DeviceID: device.ID, ProfileID: printers[0].ProfileID,
+		Enabled: true, Advertise: true, AirPrint: true,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	job, err := s.CreateJob(ctx, JobInput{Name: "test", UserName: "tester", DocumentFormat: "image/pwg-raster", Copies: 1, Bytes: 42})
+	job, err := s.CreateJob(ctx, JobInput{
+		PrinterID: configured.ID, Name: "test", UserName: "tester", DocumentFormat: "image/pwg-raster", Copies: 1, Bytes: 42,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,23 +48,20 @@ func TestStorePersistsConfigurationAndAbortsInterruptedJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	selected, err := s.SelectedDevice(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if selected.NativeID != "dev-1" {
-		t.Fatalf("selected = %+v", selected)
+	persistedPrinter, err := s.Printer(ctx, configured.ID)
+	if err != nil || !persistedPrinter.DeviceID.Valid || persistedPrinter.DeviceID.Int64 != device.ID {
+		t.Fatalf("printer = %+v, %v", persistedPrinter, err)
 	}
 	persisted, err := s.Job(ctx, job.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if persisted.State != "aborted" || !persisted.Error.Valid {
+	if persisted.PrinterID != configured.ID || persisted.State != "aborted" || !persisted.Error.Valid {
 		t.Fatalf("job = %+v", persisted)
 	}
 }
 
-func TestStoreKeepsSingleActiveProfile(t *testing.T) {
+func TestStoreSupportsSharedProfilesAndExclusiveDevices(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, filepath.Join(t.TempDir(), "puqu.db"))
 	if err != nil {
@@ -74,37 +74,28 @@ func TestStoreKeepsSingleActiveProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.ActivateProfile(ctx, profile.ID); err != nil {
-		t.Fatal(err)
-	}
-	profiles, err := s.Profiles(ctx)
+	device, err := s.SaveDevice(ctx, DeviceInput{NativeID: "dev-1", Name: "Q20", Address: "dev-1", WriteUUID: "ae01"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	active := 0
-	for _, item := range profiles {
-		if item.Active == 1 {
-			active++
-			if item.ID != profile.ID {
-				t.Fatalf("wrong active profile: %+v", item)
-			}
-		}
-	}
-	if active != 1 {
-		t.Fatalf("active profiles = %d", active)
-	}
-}
-func TestSettingsRejectRemoteAdminListener(t *testing.T) {
-	ctx := context.Background()
-	s, err := Open(ctx, filepath.Join(t.TempDir(), "puqu.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
-	_, err = s.UpdateSettings(ctx, SettingsUpdate{
-		IPPName: "PUQU", IPPListen: ":8631", AdminListen: "0.0.0.0:8080", Advertise: true,
+	first, err := s.CreatePrinter(ctx, PrinterInput{
+		Name: "Shipping", Slug: "shipping", DeviceID: device.ID, ProfileID: profile.ID, Enabled: true, Driver: DriverPUQUAQ20,
 	})
-	if err == nil {
-		t.Fatal("remote admin listener should be rejected")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.CreatePrinter(ctx, PrinterInput{
+		Name: "Returns", Slug: "returns", ProfileID: profile.ID, Enabled: true, Driver: DriverPUQUAQ20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ProfileID != second.ProfileID {
+		t.Fatalf("profiles differ: %d != %d", first.ProfileID, second.ProfileID)
+	}
+	if _, err := s.UpdatePrinter(ctx, second.ID, PrinterInput{
+		Name: second.Name, Driver: second.Driver, DeviceID: device.ID, ProfileID: profile.ID, Enabled: true,
+	}); err == nil {
+		t.Fatal("same physical device should not be assigned to two printers")
 	}
 }

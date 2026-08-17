@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/imbytecat/puqu-aq20-ipp/internal/config"
+	"github.com/imbytecat/puqu-aq20-ipp/internal/fleet"
 	"github.com/imbytecat/puqu-aq20-ipp/internal/ipp"
 	"github.com/imbytecat/puqu-aq20-ipp/internal/printer"
 	"github.com/imbytecat/puqu-aq20-ipp/internal/store"
@@ -17,31 +19,32 @@ import (
 
 type Server struct {
 	store   *store.Store
-	printer *printer.Manager
-	ipp     *ipp.Server
+	fleet   *fleet.Fleet
+	ipp     *ipp.Gateway
+	config  config.Config
 	ui      http.Handler
 	version string
 }
 
-func New(st *store.Store, device *printer.Manager, ippServer *ipp.Server, ui http.Handler, version string) *Server {
-	return &Server{store: st, printer: device, ipp: ippServer, ui: ui, version: version}
+func New(st *store.Store, printerFleet *fleet.Fleet, ippGateway *ipp.Gateway, runtimeConfig config.Config, ui http.Handler, version string) *Server {
+	return &Server{store: st, fleet: printerFleet, ipp: ippGateway, config: runtimeConfig, ui: ui, version: version}
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", s.status)
 	mux.HandleFunc("POST /api/bluetooth/scan", s.scan)
-	mux.HandleFunc("PUT /api/devices", s.saveDevice)
-	mux.HandleFunc("POST /api/devices/{id}/select", s.selectDevice)
+	mux.HandleFunc("POST /api/devices", s.saveDevice)
 	mux.HandleFunc("DELETE /api/devices/{id}", s.deleteDevice)
-	mux.HandleFunc("POST /api/printer/connect", s.connect)
-	mux.HandleFunc("POST /api/printer/test", s.testPrint)
+	mux.HandleFunc("POST /api/printers", s.createPrinter)
+	mux.HandleFunc("PUT /api/printers/{id}", s.updatePrinter)
+	mux.HandleFunc("DELETE /api/printers/{id}", s.deletePrinter)
+	mux.HandleFunc("POST /api/printers/{id}/connect", s.connect)
+	mux.HandleFunc("POST /api/printers/{id}/test", s.testPrint)
 	mux.HandleFunc("GET /api/profiles", s.profiles)
 	mux.HandleFunc("POST /api/profiles", s.createProfile)
 	mux.HandleFunc("PUT /api/profiles/{id}", s.updateProfile)
-	mux.HandleFunc("POST /api/profiles/{id}/activate", s.activateProfile)
 	mux.HandleFunc("DELETE /api/profiles/{id}", s.deleteProfile)
-	mux.HandleFunc("PUT /api/settings", s.updateSettings)
 	mux.HandleFunc("GET /api/jobs", s.jobs)
 	mux.HandleFunc("POST /api/jobs/{id}/cancel", s.cancelJob)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { writeError(w, http.StatusNotFound, "endpoint not found") })
@@ -51,28 +54,29 @@ func (s *Server) Handler() http.Handler {
 
 type statusResponse struct {
 	Version  string         `json:"version"`
-	Settings settingsDTO    `json:"settings"`
-	Printer  printer.Status `json:"printer"`
+	Config   config.Config  `json:"config"`
+	Drivers  []fleet.Driver `json:"drivers"`
+	Printers []printerDTO   `json:"printers"`
 	Devices  []deviceDTO    `json:"devices"`
 	Profiles []profileDTO   `json:"profiles"`
 	Jobs     []jobDTO       `json:"jobs"`
-	Queue    int            `json:"queueDepth"`
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request) {
-	settings, devices, profiles, jobs, err := s.snapshot(r.Context())
+	printers, devices, profiles, jobs, err := s.snapshot(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, statusResponse{
-		Version: s.version, Settings: toSettings(settings), Printer: s.printer.Status(),
-		Devices: mapDevices(devices), Profiles: mapProfiles(profiles), Jobs: mapJobs(jobs), Queue: s.ipp.QueueDepth(),
+		Version: s.version, Config: s.config, Drivers: fleet.Drivers(),
+		Printers: s.mapPrinters(printers), Devices: mapDevices(devices, printers),
+		Profiles: mapProfiles(profiles), Jobs: mapJobs(jobs),
 	})
 }
 
-func (s *Server) snapshot(ctx context.Context) (*store.Settings, []*store.Device, []*store.Profile, []*store.Job, error) {
-	settings, err := s.store.Settings(ctx)
+func (s *Server) snapshot(ctx context.Context) ([]*store.Printer, []*store.Device, []*store.Profile, []*store.Job, error) {
+	printers, err := s.store.Printers(ctx)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -85,13 +89,13 @@ func (s *Server) snapshot(ctx context.Context) (*store.Settings, []*store.Device
 		return nil, nil, nil, nil, err
 	}
 	jobs, err := s.store.Jobs(ctx, 100)
-	return settings, devices, profiles, jobs, err
+	return printers, devices, profiles, jobs, err
 }
 
 func (s *Server) scan(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
 	defer cancel()
-	devices, err := s.printer.Scan(ctx, 6*time.Second)
+	devices, err := s.fleet.Scan(ctx, 6*time.Second)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -105,7 +109,6 @@ type deviceInput struct {
 	Address    string `json:"address"`
 	WriteUUID  string `json:"writeUuid"`
 	NotifyUUID string `json:"notifyUuid"`
-	Selected   bool   `json:"selected"`
 }
 
 func (s *Server) saveDevice(w http.ResponseWriter, r *http.Request) {
@@ -121,29 +124,17 @@ func (s *Server) saveDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	device, err := s.store.SaveDevice(r.Context(), store.DeviceInput{
 		NativeID: input.NativeID, Name: input.Name, Address: input.Address,
-		WriteUUID: input.WriteUUID, NotifyUUID: input.NotifyUUID, Selected: input.Selected,
+		WriteUUID: input.WriteUUID, NotifyUUID: input.NotifyUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if input.Selected {
-		s.printer.Reconnect()
-	}
-	writeJSON(w, http.StatusOK, toDevice(device))
-}
-
-func (s *Server) selectDevice(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
+	if err := s.fleet.Reload(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := s.store.SelectDevice(r.Context(), id); err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	s.printer.Reconnect()
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, toDevice(device, nil))
 }
 
 func (s *Server) deleteDevice(w http.ResponseWriter, r *http.Request) {
@@ -155,16 +146,112 @@ func (s *Server) deleteDevice(w http.ResponseWriter, r *http.Request) {
 		writeStoreError(w, err)
 		return
 	}
+	if err := s.reload(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-func (s *Server) connect(w http.ResponseWriter, _ *http.Request) {
-	s.printer.Reconnect()
+type printerInput struct {
+	Name      string `json:"name"`
+	Slug      string `json:"slug"`
+	Driver    string `json:"driver"`
+	DeviceID  *int64 `json:"deviceId"`
+	ProfileID int64  `json:"profileId"`
+	Enabled   bool   `json:"enabled"`
+	Advertise bool   `json:"advertise"`
+	AirPrint  bool   `json:"airPrint"`
+}
+
+func (input printerInput) storeInput() store.PrinterInput {
+	deviceID := int64(0)
+	if input.DeviceID != nil {
+		deviceID = *input.DeviceID
+	}
+	return store.PrinterInput{
+		Name: input.Name, Slug: input.Slug, Driver: input.Driver, DeviceID: deviceID,
+		ProfileID: input.ProfileID, Enabled: input.Enabled, Advertise: input.Advertise, AirPrint: input.AirPrint,
+	}
+}
+
+func (s *Server) createPrinter(w http.ResponseWriter, r *http.Request) {
+	var input printerInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	configured, err := s.store.CreatePrinter(r.Context(), input.storeInput())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.reload(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, s.toPrinter(configured))
+}
+
+func (s *Server) updatePrinter(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var input printerInput
+	if !decodeJSON(w, r, &input) {
+		return
+	}
+	configured, err := s.store.UpdatePrinter(r.Context(), id, input.storeInput())
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := s.reload(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, s.toPrinter(configured))
+}
+
+func (s *Server) deletePrinter(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := s.store.DeletePrinter(r.Context(), id); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := s.reload(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) connect(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	if err := s.fleet.Reconnect(id); err != nil {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusAccepted, map[string]bool{"ok": true})
 }
 
 func (s *Server) testPrint(w http.ResponseWriter, r *http.Request) {
-	profile, err := s.store.ActiveProfile(r.Context())
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	configured, err := s.store.Printer(r.Context(), id)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	profile, err := s.store.Profile(r.Context(), configured.ProfileID)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -176,7 +263,7 @@ func (s *Server) testPrint(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	result, err := s.printer.Print(ctx, []printer.Job{job}, printer.Settings{
+	result, err := s.fleet.Print(ctx, id, []printer.Job{job}, printer.Settings{
 		Darkness: int(profile.Darkness), Speed: int(profile.Speed), PaperType: int(profile.PaperType),
 	})
 	if err != nil {
@@ -243,19 +330,6 @@ func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toProfile(profile))
 }
 
-func (s *Server) activateProfile(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	if err := s.store.ActivateProfile(r.Context(), id); err != nil {
-		writeStoreError(w, err)
-		return
-	}
-	s.ipp.ReloadDiscovery()
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
 func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -266,31 +340,6 @@ func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-}
-
-type settingsInput struct {
-	IPPName     string `json:"ippName"`
-	IPPListen   string `json:"ippListen"`
-	AdminListen string `json:"adminListen"`
-	Advertise   bool   `json:"advertise"`
-	AirPrint    bool   `json:"airPrint"`
-}
-
-func (s *Server) updateSettings(w http.ResponseWriter, r *http.Request) {
-	var input settingsInput
-	if !decodeJSON(w, r, &input) {
-		return
-	}
-	settings, err := s.store.UpdateSettings(r.Context(), store.SettingsUpdate{
-		IPPName: input.IPPName, IPPListen: input.IPPListen, AdminListen: input.AdminListen,
-		Advertise: input.Advertise, AirPrint: input.AirPrint,
-	})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s.ipp.ReloadDiscovery()
-	writeJSON(w, http.StatusOK, map[string]any{"settings": toSettings(settings), "restartRequired": true})
 }
 
 func (s *Server) jobs(w http.ResponseWriter, r *http.Request) {
@@ -314,11 +363,18 @@ func (s *Server) cancelJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+func (s *Server) reload(ctx context.Context) error {
+	if err := s.fleet.Reload(ctx); err != nil {
+		return err
+	}
+	return s.ipp.Reload(ctx)
+}
+
 func testPattern(profile *store.Profile) (printer.Job, error) {
 	width := int((profile.WidthUm*8 + 500) / 1000)
 	height := int((profile.HeightUm*8 + 500) / 1000)
 	if width < 16 || width > 2040 || height < 16 || height > 65535 {
-		return printer.Job{}, errors.New("active label dimensions exceed printer limits")
+		return printer.Job{}, errors.New("label dimensions exceed printer limits")
 	}
 	widthBytes := (width + 7) / 8
 	data := make([]byte, widthBytes*height)
@@ -368,7 +424,7 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	writeError(w, http.StatusInternalServerError, err.Error())
+	writeError(w, http.StatusBadRequest, err.Error())
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -381,25 +437,31 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
-type settingsDTO struct {
-	IPPName     string `json:"ippName"`
-	PrinterUUID string `json:"printerUuid"`
-	IPPListen   string `json:"ippListen"`
-	AdminListen string `json:"adminListen"`
-	Advertise   bool   `json:"advertise"`
-	AirPrint    bool   `json:"airPrint"`
-	UpdatedAt   int64  `json:"updatedAt"`
+type printerDTO struct {
+	ID         int64          `json:"id"`
+	Name       string         `json:"name"`
+	Slug       string         `json:"slug"`
+	UUID       string         `json:"uuid"`
+	Driver     string         `json:"driver"`
+	DeviceID   *int64         `json:"deviceId"`
+	ProfileID  int64          `json:"profileId"`
+	Enabled    bool           `json:"enabled"`
+	Advertise  bool           `json:"advertise"`
+	AirPrint   bool           `json:"airPrint"`
+	Status     printer.Status `json:"status"`
+	QueueDepth int            `json:"queueDepth"`
+	UpdatedAt  int64          `json:"updatedAt"`
 }
 
 type deviceDTO struct {
-	ID         int64   `json:"id"`
-	NativeID   string  `json:"nativeId"`
-	Name       string  `json:"name"`
-	Address    string  `json:"address"`
-	WriteUUID  string  `json:"writeUuid"`
-	NotifyUUID *string `json:"notifyUuid"`
-	Selected   bool    `json:"selected"`
-	LastSeenAt int64   `json:"lastSeenAt"`
+	ID                int64   `json:"id"`
+	NativeID          string  `json:"nativeId"`
+	Name              string  `json:"name"`
+	Address           string  `json:"address"`
+	WriteUUID         string  `json:"writeUuid"`
+	NotifyUUID        *string `json:"notifyUuid"`
+	AssignedPrinterID *int64  `json:"assignedPrinterId"`
+	LastSeenAt        int64   `json:"lastSeenAt"`
 }
 
 type profileDTO struct {
@@ -411,11 +473,11 @@ type profileDTO struct {
 	PaperType int64   `json:"paperType"`
 	Darkness  int64   `json:"darkness"`
 	Speed     int64   `json:"speed"`
-	Active    bool    `json:"active"`
 }
 
 type jobDTO struct {
 	ID             int64   `json:"id"`
+	PrinterID      int64   `json:"printerId"`
 	Name           string  `json:"name"`
 	UserName       string  `json:"userName"`
 	State          string  `json:"state"`
@@ -428,32 +490,47 @@ type jobDTO struct {
 	CompletedAt    *int64  `json:"completedAt"`
 }
 
-func toSettings(value *store.Settings) settingsDTO {
-	return settingsDTO{IPPName: value.IppName, PrinterUUID: value.PrinterUuid, IPPListen: value.IppListen,
-		AdminListen: value.AdminListen, Advertise: value.Advertise == 1, AirPrint: value.Airprint == 1, UpdatedAt: value.UpdatedAt}
-}
-
-func toDevice(value *store.Device) deviceDTO {
-	var notify *string
-	if value.NotifyUuid.Valid {
-		notify = &value.NotifyUuid.String
-	}
-	return deviceDTO{ID: value.ID, NativeID: value.NativeID, Name: value.Name, Address: value.Address,
-		WriteUUID: value.WriteUuid, NotifyUUID: notify, Selected: value.Selected == 1, LastSeenAt: value.LastSeenAt}
-}
-
-func mapDevices(values []*store.Device) []deviceDTO {
-	out := make([]deviceDTO, len(values))
+func (s *Server) mapPrinters(values []*store.Printer) []printerDTO {
+	out := make([]printerDTO, len(values))
 	for i, value := range values {
-		out[i] = toDevice(value)
+		out[i] = s.toPrinter(value)
 	}
 	return out
 }
 
-func toProfile(value *store.Profile) profileDTO {
-	return profileDTO{ID: value.ID, Name: value.Name, WidthMM: float64(value.WidthUm) / 1000,
-		HeightMM: float64(value.HeightUm) / 1000, GapMM: float64(value.GapUm) / 1000,
-		PaperType: value.PaperType, Darkness: value.Darkness, Speed: value.Speed, Active: value.Active == 1}
+func (s *Server) toPrinter(value *store.Printer) printerDTO {
+	return printerDTO{
+		ID: value.ID, Name: value.Name, Slug: value.Slug, UUID: value.Uuid, Driver: value.Driver,
+		DeviceID: nullInt64(value.DeviceID), ProfileID: value.ProfileID, Enabled: value.Enabled == 1,
+		Advertise: value.Advertise == 1, AirPrint: value.Airprint == 1,
+		Status: s.fleet.Status(value.ID), QueueDepth: s.ipp.QueueDepth(value.ID), UpdatedAt: value.UpdatedAt,
+	}
+}
+
+func mapDevices(values []*store.Device, printers []*store.Printer) []deviceDTO {
+	assigned := make(map[int64]int64, len(printers))
+	for _, configured := range printers {
+		if configured.DeviceID.Valid {
+			assigned[configured.DeviceID.Int64] = configured.ID
+		}
+	}
+	out := make([]deviceDTO, len(values))
+	for i, value := range values {
+		var printerID *int64
+		if id, ok := assigned[value.ID]; ok {
+			printerID = &id
+		}
+		out[i] = toDevice(value, printerID)
+	}
+	return out
+}
+
+func toDevice(value *store.Device, assignedPrinterID *int64) deviceDTO {
+	return deviceDTO{
+		ID: value.ID, NativeID: value.NativeID, Name: value.Name, Address: value.Address,
+		WriteUUID: value.WriteUuid, NotifyUUID: nullString(value.NotifyUuid),
+		AssignedPrinterID: assignedPrinterID, LastSeenAt: value.LastSeenAt,
+	}
 }
 
 func mapProfiles(values []*store.Profile) []profileDTO {
@@ -464,13 +541,23 @@ func mapProfiles(values []*store.Profile) []profileDTO {
 	return out
 }
 
+func toProfile(value *store.Profile) profileDTO {
+	return profileDTO{
+		ID: value.ID, Name: value.Name, WidthMM: float64(value.WidthUm) / 1000,
+		HeightMM: float64(value.HeightUm) / 1000, GapMM: float64(value.GapUm) / 1000,
+		PaperType: value.PaperType, Darkness: value.Darkness, Speed: value.Speed,
+	}
+}
+
 func mapJobs(values []*store.Job) []jobDTO {
 	out := make([]jobDTO, len(values))
 	for i, value := range values {
-		out[i] = jobDTO{ID: value.ID, Name: value.Name, UserName: value.UserName, State: value.State,
-			DocumentFormat: value.DocumentFormat, Copies: value.Copies, Bytes: value.Bytes,
+		out[i] = jobDTO{
+			ID: value.ID, PrinterID: value.PrinterID, Name: value.Name, UserName: value.UserName,
+			State: value.State, DocumentFormat: value.DocumentFormat, Copies: value.Copies, Bytes: value.Bytes,
 			Error: nullString(value.Error), CreatedAt: value.CreatedAt,
-			StartedAt: nullInt(value.StartedAt), CompletedAt: nullInt(value.CompletedAt)}
+			StartedAt: nullInt64(value.StartedAt), CompletedAt: nullInt64(value.CompletedAt),
+		}
 	}
 	return out
 }
@@ -482,7 +569,7 @@ func nullString(value sql.NullString) *string {
 	return &value.String
 }
 
-func nullInt(value sql.NullInt64) *int64 {
+func nullInt64(value sql.NullInt64) *int64 {
 	if !value.Valid {
 		return nil
 	}

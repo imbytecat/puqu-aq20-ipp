@@ -7,10 +7,8 @@ import (
 	"embed"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -23,9 +21,9 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-type Settings = sqlitedb.AppSetting
 type Device = sqlitedb.BleDevice
 type Profile = sqlitedb.LabelProfile
+type Printer = sqlitedb.Printer
 type Job = sqlitedb.PrintJob
 
 type Store struct {
@@ -86,10 +84,6 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	}
 
 	s := &Store{db: db, q: sqlitedb.New(db)}
-	if err := s.ensurePrinterUUID(ctx); err != nil {
-		db.Close()
-		return nil, err
-	}
 	now := nullableTime(time.Now())
 	if err := s.q.AbortInterruptedJobs(ctx, now); err != nil {
 		db.Close()
@@ -104,93 +98,8 @@ func Open(ctx context.Context, path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
-func (s *Store) ensurePrinterUUID(ctx context.Context) error {
-	settings, err := s.q.GetSettings(ctx)
-	if err != nil {
-		return err
-	}
-	if settings.PrinterUuid != "" {
-		return nil
-	}
-	id, err := randomUUID()
-	if err != nil {
-		return err
-	}
-	return s.q.SetPrinterUUID(ctx, sqlitedb.SetPrinterUUIDParams{
-		PrinterUuid: id,
-		UpdatedAt:   unixMillis(time.Now()),
-	})
-}
-
-func (s *Store) Settings(ctx context.Context) (*Settings, error) {
-	return s.q.GetSettings(ctx)
-}
-
-type SettingsUpdate struct {
-	IPPName     string
-	IPPListen   string
-	AdminListen string
-	Advertise   bool
-	AirPrint    bool
-}
-
-func ValidateSettings(update SettingsUpdate) error {
-	update.IPPName = strings.TrimSpace(update.IPPName)
-	update.IPPListen = strings.TrimSpace(update.IPPListen)
-	update.AdminListen = strings.TrimSpace(update.AdminListen)
-	if update.IPPName == "" || update.IPPListen == "" || update.AdminListen == "" {
-		return errors.New("IPP name and listen addresses are required")
-	}
-	if err := validateListenAddress(update.IPPListen, false); err != nil {
-		return fmt.Errorf("invalid IPP listen address: %w", err)
-	}
-	if err := validateListenAddress(update.AdminListen, true); err != nil {
-		return fmt.Errorf("invalid admin listen address: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) UpdateSettings(ctx context.Context, update SettingsUpdate) (*Settings, error) {
-	update.IPPName = strings.TrimSpace(update.IPPName)
-	update.IPPListen = strings.TrimSpace(update.IPPListen)
-	update.AdminListen = strings.TrimSpace(update.AdminListen)
-	if err := ValidateSettings(update); err != nil {
-		return nil, err
-	}
-	return s.q.UpdateSettings(ctx, sqlitedb.UpdateSettingsParams{
-		IppName: update.IPPName, IppListen: update.IPPListen, AdminListen: update.AdminListen,
-		Advertise: boolInt(update.Advertise), Airprint: boolInt(update.AirPrint), UpdatedAt: unixMillis(time.Now()),
-	})
-}
-
-func validateListenAddress(address string, loopbackOnly bool) error {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return err
-	}
-	portNumber, err := strconv.Atoi(port)
-	if err != nil || portNumber < 1 || portNumber > 65535 {
-		return errors.New("port must be between 1 and 65535")
-	}
-	if !loopbackOnly {
-		return nil
-	}
-	if strings.EqualFold(host, "localhost") {
-		return nil
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
-		return errors.New("admin listener must use localhost or a loopback IP")
-	}
-	return nil
-}
-
 func (s *Store) Devices(ctx context.Context) ([]*Device, error) {
 	return s.q.ListDevices(ctx)
-}
-
-func (s *Store) SelectedDevice(ctx context.Context) (*Device, error) {
-	return s.q.GetSelectedDevice(ctx)
 }
 
 type DeviceInput struct {
@@ -199,7 +108,6 @@ type DeviceInput struct {
 	Address    string
 	WriteUUID  string
 	NotifyUUID string
-	Selected   bool
 }
 
 func (s *Store) SaveDevice(ctx context.Context, input DeviceInput) (*Device, error) {
@@ -211,63 +119,16 @@ func (s *Store) SaveDevice(ctx context.Context, input DeviceInput) (*Device, err
 	if input.NativeID == "" || input.Name == "" || input.Address == "" || input.WriteUUID == "" {
 		return nil, errors.New("device id, name, address, and write UUID are required")
 	}
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	q := s.q.WithTx(tx)
 	now := unixMillis(time.Now())
-	device, err := q.UpsertDevice(ctx, sqlitedb.UpsertDeviceParams{
-		NativeID:   input.NativeID,
-		Name:       input.Name,
-		Address:    input.Address,
-		WriteUuid:  input.WriteUUID,
-		NotifyUuid: nullableString(input.NotifyUUID),
-		LastSeenAt: now,
-		UpdatedAt:  now,
+	return s.q.UpsertDevice(ctx, sqlitedb.UpsertDeviceParams{
+		NativeID: input.NativeID, Name: input.Name, Address: input.Address,
+		WriteUuid: input.WriteUUID, NotifyUuid: nullableString(input.NotifyUUID),
+		LastSeenAt: now, UpdatedAt: now,
 	})
-	if err != nil {
-		return nil, err
-	}
-	if input.Selected {
-		if err := q.ClearSelectedDevice(ctx); err != nil {
-			return nil, err
-		}
-		rows, err := q.SelectDevice(ctx, sqlitedb.SelectDeviceParams{UpdatedAt: now, ID: device.ID})
-		if err != nil {
-			return nil, err
-		}
-		if rows != 1 {
-			return nil, sql.ErrNoRows
-		}
-		device.Selected = 1
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return device, nil
 }
 
-func (s *Store) SelectDevice(ctx context.Context, id int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	q := s.q.WithTx(tx)
-	if err := q.ClearSelectedDevice(ctx); err != nil {
-		return err
-	}
-	rows, err := q.SelectDevice(ctx, sqlitedb.SelectDeviceParams{UpdatedAt: unixMillis(time.Now()), ID: id})
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return sql.ErrNoRows
-	}
-	return tx.Commit()
+func (s *Store) Device(ctx context.Context, id int64) (*Device, error) {
+	return s.q.GetDevice(ctx, id)
 }
 
 func (s *Store) DeleteDevice(ctx context.Context, id int64) error {
@@ -285,8 +146,8 @@ func (s *Store) Profiles(ctx context.Context) ([]*Profile, error) {
 	return s.q.ListProfiles(ctx)
 }
 
-func (s *Store) ActiveProfile(ctx context.Context) (*Profile, error) {
-	return s.q.GetActiveProfile(ctx)
+func (s *Store) Profile(ctx context.Context, id int64) (*Profile, error) {
+	return s.q.GetProfile(ctx, id)
 }
 
 type ProfileInput struct {
@@ -338,38 +199,127 @@ func (s *Store) UpdateProfile(ctx context.Context, id int64, input ProfileInput)
 	})
 }
 
-func (s *Store) ActivateProfile(ctx context.Context, id int64) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	q := s.q.WithTx(tx)
-	if err := q.ClearActiveProfile(ctx); err != nil {
-		return err
-	}
-	rows, err := q.ActivateProfile(ctx, sqlitedb.ActivateProfileParams{UpdatedAt: unixMillis(time.Now()), ID: id})
-	if err != nil {
-		return err
-	}
-	if rows != 1 {
-		return sql.ErrNoRows
-	}
-	return tx.Commit()
-}
-
 func (s *Store) DeleteProfile(ctx context.Context, id int64) error {
 	rows, err := s.q.DeleteProfile(ctx, id)
 	if err != nil {
 		return err
 	}
 	if rows != 1 {
-		return errors.New("profile not found or active")
+		return sql.ErrNoRows
 	}
 	return nil
 }
 
+const DriverPUQUAQ20 = "puqu-aq20"
+
+type PrinterInput struct {
+	Name      string
+	Slug      string
+	Driver    string
+	DeviceID  int64
+	ProfileID int64
+	Enabled   bool
+	Advertise bool
+	AirPrint  bool
+}
+
+func (s *Store) Printers(ctx context.Context) ([]*Printer, error) {
+	return s.q.ListPrinters(ctx)
+}
+
+func (s *Store) Printer(ctx context.Context, id int64) (*Printer, error) {
+	return s.q.GetPrinter(ctx, id)
+}
+
+func (s *Store) PrinterBySlug(ctx context.Context, slug string) (*Printer, error) {
+	return s.q.GetPrinterBySlug(ctx, slug)
+}
+
+func (s *Store) CreatePrinter(ctx context.Context, input PrinterInput) (*Printer, error) {
+	input.Name = strings.TrimSpace(input.Name)
+	input.Slug = slugify(input.Slug)
+	if input.Slug == "" {
+		input.Slug = slugify(input.Name)
+	}
+	if input.Driver == "" {
+		input.Driver = DriverPUQUAQ20
+	}
+	if err := validatePrinter(input, true); err != nil {
+		return nil, err
+	}
+	uuid, err := randomUUID()
+	if err != nil {
+		return nil, err
+	}
+	now := unixMillis(time.Now())
+	return s.q.CreatePrinter(ctx, sqlitedb.CreatePrinterParams{
+		Name: input.Name, Slug: input.Slug, Uuid: uuid, Driver: input.Driver,
+		DeviceID: nullableID(input.DeviceID), ProfileID: input.ProfileID,
+		Enabled: boolInt(input.Enabled), Advertise: boolInt(input.Advertise), Airprint: boolInt(input.AirPrint),
+		CreatedAt: now, UpdatedAt: now,
+	})
+}
+
+func (s *Store) UpdatePrinter(ctx context.Context, id int64, input PrinterInput) (*Printer, error) {
+	input.Name = strings.TrimSpace(input.Name)
+	if input.Driver == "" {
+		input.Driver = DriverPUQUAQ20
+	}
+	if err := validatePrinter(input, false); err != nil {
+		return nil, err
+	}
+	return s.q.UpdatePrinter(ctx, sqlitedb.UpdatePrinterParams{
+		Name: input.Name, Driver: input.Driver, DeviceID: nullableID(input.DeviceID), ProfileID: input.ProfileID,
+		Enabled: boolInt(input.Enabled), Advertise: boolInt(input.Advertise), Airprint: boolInt(input.AirPrint),
+		UpdatedAt: unixMillis(time.Now()), ID: id,
+	})
+}
+
+func validatePrinter(input PrinterInput, requireSlug bool) error {
+	if input.Name == "" {
+		return errors.New("printer name is required")
+	}
+	if requireSlug && input.Slug == "" {
+		return errors.New("printer queue name must contain a letter or number")
+	}
+	if input.Driver != DriverPUQUAQ20 {
+		return fmt.Errorf("unsupported printer driver %q", input.Driver)
+	}
+	if input.ProfileID < 1 {
+		return errors.New("label profile is required")
+	}
+	return nil
+}
+
+func (s *Store) DeletePrinter(ctx context.Context, id int64) error {
+	rows, err := s.q.DeletePrinter(ctx, id)
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func slugify(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	dash := false
+	for _, r := range value {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+			dash = false
+		} else if b.Len() > 0 && !dash {
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	return strings.TrimRight(b.String(), "-")
+}
+
 type JobInput struct {
+	PrinterID      int64
 	Name           string
 	UserName       string
 	DocumentFormat string
@@ -378,6 +328,9 @@ type JobInput struct {
 }
 
 func (s *Store) CreateJob(ctx context.Context, input JobInput) (*Job, error) {
+	if input.PrinterID < 1 {
+		return nil, errors.New("printer is required")
+	}
 	if input.Name == "" {
 		input.Name = "Untitled"
 	}
@@ -388,8 +341,9 @@ func (s *Store) CreateJob(ctx context.Context, input JobInput) (*Job, error) {
 		input.Copies = 1
 	}
 	return s.q.CreateJob(ctx, sqlitedb.CreateJobParams{
-		Name: input.Name, UserName: input.UserName, DocumentFormat: input.DocumentFormat,
-		Copies: input.Copies, Bytes: input.Bytes, CreatedAt: unixMillis(time.Now()),
+		PrinterID: input.PrinterID, Name: input.Name, UserName: input.UserName,
+		DocumentFormat: input.DocumentFormat, Copies: input.Copies, Bytes: input.Bytes,
+		CreatedAt: unixMillis(time.Now()),
 	})
 }
 
@@ -404,8 +358,11 @@ func (s *Store) Jobs(ctx context.Context, limit int64) ([]*Job, error) {
 	return s.q.ListJobs(ctx, limit)
 }
 
-func (s *Store) PendingJobs(ctx context.Context) ([]*Job, error) {
-	return s.q.ListJobsByState(ctx, "pending")
+func (s *Store) JobsByPrinter(ctx context.Context, printerID, limit int64) ([]*Job, error) {
+	if limit < 1 || limit > 500 {
+		limit = 100
+	}
+	return s.q.ListJobsByPrinter(ctx, sqlitedb.ListJobsByPrinterParams{PrinterID: printerID, Limit: limit})
 }
 
 func (s *Store) SetJobBytes(ctx context.Context, id, bytes int64) error {
@@ -452,6 +409,10 @@ func nullableTime(t time.Time) sql.NullInt64 {
 
 func nullableString(value string) sql.NullString {
 	return sql.NullString{String: value, Valid: value != ""}
+}
+
+func nullableID(value int64) sql.NullInt64 {
+	return sql.NullInt64{Int64: value, Valid: value > 0}
 }
 
 func boolInt(value bool) int64 {

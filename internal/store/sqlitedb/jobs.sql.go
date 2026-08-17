@@ -75,12 +75,13 @@ func (q *Queries) CompleteJob(ctx context.Context, arg CompleteJobParams) (int64
 
 const createJob = `-- name: CreateJob :one
 INSERT INTO print_jobs (
-    name, user_name, state, document_format, copies, bytes, error, created_at
-) VALUES (?, ?, 'pending', ?, ?, ?, NULL, ?)
-RETURNING id, name, user_name, state, document_format, copies, bytes, error, created_at, started_at, completed_at
+    printer_id, name, user_name, state, document_format, copies, bytes, error, created_at
+) VALUES (?, ?, ?, 'pending', ?, ?, ?, NULL, ?)
+RETURNING id, printer_id, name, user_name, state, document_format, copies, bytes, error, created_at, started_at, completed_at
 `
 
 type CreateJobParams struct {
+	PrinterID      int64  `json:"printer_id"`
 	Name           string `json:"name"`
 	UserName       string `json:"user_name"`
 	DocumentFormat string `json:"document_format"`
@@ -91,6 +92,7 @@ type CreateJobParams struct {
 
 func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (*PrintJob, error) {
 	row := q.db.QueryRowContext(ctx, createJob,
+		arg.PrinterID,
 		arg.Name,
 		arg.UserName,
 		arg.DocumentFormat,
@@ -101,6 +103,7 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (*PrintJob
 	var i PrintJob
 	err := row.Scan(
 		&i.ID,
+		&i.PrinterID,
 		&i.Name,
 		&i.UserName,
 		&i.State,
@@ -116,7 +119,7 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (*PrintJob
 }
 
 const getJob = `-- name: GetJob :one
-SELECT id, name, user_name, state, document_format, copies, bytes, error, created_at, started_at, completed_at FROM print_jobs WHERE id = ?
+SELECT id, printer_id, name, user_name, state, document_format, copies, bytes, error, created_at, started_at, completed_at FROM print_jobs WHERE id = ?
 `
 
 func (q *Queries) GetJob(ctx context.Context, id int64) (*PrintJob, error) {
@@ -124,6 +127,7 @@ func (q *Queries) GetJob(ctx context.Context, id int64) (*PrintJob, error) {
 	var i PrintJob
 	err := row.Scan(
 		&i.ID,
+		&i.PrinterID,
 		&i.Name,
 		&i.UserName,
 		&i.State,
@@ -139,7 +143,7 @@ func (q *Queries) GetJob(ctx context.Context, id int64) (*PrintJob, error) {
 }
 
 const listJobs = `-- name: ListJobs :many
-SELECT id, name, user_name, state, document_format, copies, bytes, error, created_at, started_at, completed_at FROM print_jobs ORDER BY id DESC LIMIT ?
+SELECT id, printer_id, name, user_name, state, document_format, copies, bytes, error, created_at, started_at, completed_at FROM print_jobs ORDER BY id DESC LIMIT ?
 `
 
 func (q *Queries) ListJobs(ctx context.Context, limit int64) ([]*PrintJob, error) {
@@ -153,6 +157,7 @@ func (q *Queries) ListJobs(ctx context.Context, limit int64) ([]*PrintJob, error
 		var i PrintJob
 		if err := rows.Scan(
 			&i.ID,
+			&i.PrinterID,
 			&i.Name,
 			&i.UserName,
 			&i.State,
@@ -177,12 +182,17 @@ func (q *Queries) ListJobs(ctx context.Context, limit int64) ([]*PrintJob, error
 	return items, nil
 }
 
-const listJobsByState = `-- name: ListJobsByState :many
-SELECT id, name, user_name, state, document_format, copies, bytes, error, created_at, started_at, completed_at FROM print_jobs WHERE state = ? ORDER BY id ASC
+const listJobsByPrinter = `-- name: ListJobsByPrinter :many
+SELECT id, printer_id, name, user_name, state, document_format, copies, bytes, error, created_at, started_at, completed_at FROM print_jobs WHERE printer_id = ? ORDER BY id DESC LIMIT ?
 `
 
-func (q *Queries) ListJobsByState(ctx context.Context, state string) ([]*PrintJob, error) {
-	rows, err := q.db.QueryContext(ctx, listJobsByState, state)
+type ListJobsByPrinterParams struct {
+	PrinterID int64 `json:"printer_id"`
+	Limit     int64 `json:"limit"`
+}
+
+func (q *Queries) ListJobsByPrinter(ctx context.Context, arg ListJobsByPrinterParams) ([]*PrintJob, error) {
+	rows, err := q.db.QueryContext(ctx, listJobsByPrinter, arg.PrinterID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -192,6 +202,7 @@ func (q *Queries) ListJobsByState(ctx context.Context, state string) ([]*PrintJo
 		var i PrintJob
 		if err := rows.Scan(
 			&i.ID,
+			&i.PrinterID,
 			&i.Name,
 			&i.UserName,
 			&i.State,

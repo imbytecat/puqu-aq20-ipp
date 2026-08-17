@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/imbytecat/puqu-aq20-ipp/internal/config"
 	"github.com/kardianos/service"
 	"github.com/spf13/cobra"
 )
@@ -13,6 +14,7 @@ const serviceRunName = "service-run"
 
 type serviceProgram struct {
 	data   string
+	config config.Config
 	cancel context.CancelFunc
 	done   chan error
 	mu     sync.Mutex
@@ -24,7 +26,7 @@ func (p *serviceProgram) Start(service.Service) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	p.cancel = cancel
 	p.done = make(chan error, 1)
-	go func() { p.done <- runDaemon(ctx, p.data) }()
+	go func() { p.done <- runDaemon(ctx, p.data, p.config) }()
 	return nil
 }
 
@@ -49,7 +51,7 @@ func serviceCmd() *cobra.Command {
 		ValidArgs: []string{"install", "uninstall", "start", "stop", "restart", "status"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			data, _ := cmd.Flags().GetString("data")
-			svc, err := newService(data)
+			svc, err := newService(data, commandConfig(cmd))
 			if err != nil {
 				return err
 			}
@@ -72,7 +74,7 @@ func serviceRunCmd() *cobra.Command {
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			data, _ := cmd.Flags().GetString("data")
-			svc, err := newService(data)
+			svc, err := newService(data, commandConfig(cmd))
 			if err != nil {
 				return err
 			}
@@ -81,14 +83,18 @@ func serviceRunCmd() *cobra.Command {
 	}
 }
 
-func newService(data string) (service.Service, error) {
-	arguments := []string{serviceRunName}
+func newService(data string, runtimeConfig config.Config) (service.Service, error) {
+	arguments := []string{
+		serviceRunName,
+		"--ipp-listen", runtimeConfig.IPPListen,
+		"--admin-listen", runtimeConfig.AdminListen,
+	}
 	if data != "" {
 		arguments = append(arguments, "--data", data)
 	}
-	return service.New(&serviceProgram{data: data}, &service.Config{
+	return service.New(&serviceProgram{data: data, config: runtimeConfig}, &service.Config{
 		Name: "puqu-aq20-ipp", DisplayName: "PUQU AQ20 IPP Bridge",
-		Description: "Exposes a PUQU AQ20 Bluetooth label printer through IPP Everywhere.",
+		Description: "Exposes PUQU AQ20 Bluetooth label printers through IPP Everywhere.",
 		Arguments:   arguments,
 	})
 }

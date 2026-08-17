@@ -1,4 +1,4 @@
-import type { ProfileInput, ScannedDevice, Settings, Status } from "./types";
+import type { Printer, PrinterInput, Profile, ProfileInput, ScannedDevice, Status } from "./types";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
@@ -15,29 +15,21 @@ export const api = {
   scan: () => request<{ devices: ScannedDevice[] }>("/api/bluetooth/scan", { method: "POST" }),
   saveDevice: (device: ScannedDevice) =>
     request("/api/devices", {
-      method: "PUT",
-      body: JSON.stringify({ nativeId: device.id, name: device.name, address: device.address, selected: true }),
+      method: "POST",
+      body: JSON.stringify({ nativeId: device.id, name: device.name || device.id, address: device.address }),
     }),
-  selectDevice: (id: number) => request(`/api/devices/${id}/select`, { method: "POST" }),
   deleteDevice: (id: number) => request(`/api/devices/${id}`, { method: "DELETE" }),
-  connect: () => request("/api/printer/connect", { method: "POST" }),
-  testPrint: () => request("/api/printer/test", { method: "POST" }),
+  createPrinter: (printer: PrinterInput) =>
+    request<Printer>("/api/printers", { method: "POST", body: JSON.stringify(printer) }),
+  updatePrinter: (id: number, printer: PrinterInput) =>
+    request<Printer>(`/api/printers/${id}`, { method: "PUT", body: JSON.stringify(printer) }),
+  deletePrinter: (id: number) => request(`/api/printers/${id}`, { method: "DELETE" }),
+  connect: (id: number) => request(`/api/printers/${id}/connect`, { method: "POST" }),
+  testPrint: (id: number) => request(`/api/printers/${id}/test`, { method: "POST" }),
   createProfile: (profile: ProfileInput) =>
-    request("/api/profiles", { method: "POST", body: JSON.stringify(profile) }),
+    request<Profile>("/api/profiles", { method: "POST", body: JSON.stringify(profile) }),
   updateProfile: (id: number, profile: ProfileInput) =>
-    request(`/api/profiles/${id}`, { method: "PUT", body: JSON.stringify(profile) }),
-  activateProfile: (id: number) => request(`/api/profiles/${id}/activate`, { method: "POST" }),
+    request<Profile>(`/api/profiles/${id}`, { method: "PUT", body: JSON.stringify(profile) }),
   deleteProfile: (id: number) => request(`/api/profiles/${id}`, { method: "DELETE" }),
-  updateSettings: (settings: Settings) =>
-    request<{ restartRequired: boolean }>("/api/settings", {
-      method: "PUT",
-      body: JSON.stringify({
-        ippName: settings.ippName,
-        ippListen: settings.ippListen,
-        adminListen: settings.adminListen,
-        advertise: settings.advertise,
-        airPrint: settings.airPrint,
-      }),
-    }),
   cancelJob: (id: number) => request(`/api/jobs/${id}/cancel`, { method: "POST" }),
 };

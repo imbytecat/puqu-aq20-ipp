@@ -9,37 +9,11 @@ import (
 	"context"
 )
 
-const activateProfile = `-- name: ActivateProfile :execrows
-UPDATE label_profiles SET active = 1, updated_at = ? WHERE id = ?
-`
-
-type ActivateProfileParams struct {
-	UpdatedAt int64 `json:"updated_at"`
-	ID        int64 `json:"id"`
-}
-
-func (q *Queries) ActivateProfile(ctx context.Context, arg ActivateProfileParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, activateProfile, arg.UpdatedAt, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-const clearActiveProfile = `-- name: ClearActiveProfile :exec
-UPDATE label_profiles SET active = 0 WHERE active = 1
-`
-
-func (q *Queries) ClearActiveProfile(ctx context.Context) error {
-	_, err := q.db.ExecContext(ctx, clearActiveProfile)
-	return err
-}
-
 const createProfile = `-- name: CreateProfile :one
 INSERT INTO label_profiles (
-    name, width_um, height_um, gap_um, paper_type, darkness, speed, active, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
-RETURNING id, name, width_um, height_um, gap_um, paper_type, darkness, speed, active, created_at, updated_at
+    name, width_um, height_um, gap_um, paper_type, darkness, speed, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+RETURNING id, name, width_um, height_um, gap_um, paper_type, darkness, speed, created_at, updated_at
 `
 
 type CreateProfileParams struct {
@@ -76,7 +50,6 @@ func (q *Queries) CreateProfile(ctx context.Context, arg CreateProfileParams) (*
 		&i.PaperType,
 		&i.Darkness,
 		&i.Speed,
-		&i.Active,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -84,7 +57,7 @@ func (q *Queries) CreateProfile(ctx context.Context, arg CreateProfileParams) (*
 }
 
 const deleteProfile = `-- name: DeleteProfile :execrows
-DELETE FROM label_profiles WHERE id = ? AND active = 0
+DELETE FROM label_profiles WHERE id = ?
 `
 
 func (q *Queries) DeleteProfile(ctx context.Context, id int64) (int64, error) {
@@ -95,31 +68,8 @@ func (q *Queries) DeleteProfile(ctx context.Context, id int64) (int64, error) {
 	return result.RowsAffected()
 }
 
-const getActiveProfile = `-- name: GetActiveProfile :one
-SELECT id, name, width_um, height_um, gap_um, paper_type, darkness, speed, active, created_at, updated_at FROM label_profiles WHERE active = 1 LIMIT 1
-`
-
-func (q *Queries) GetActiveProfile(ctx context.Context) (*LabelProfile, error) {
-	row := q.db.QueryRowContext(ctx, getActiveProfile)
-	var i LabelProfile
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.WidthUm,
-		&i.HeightUm,
-		&i.GapUm,
-		&i.PaperType,
-		&i.Darkness,
-		&i.Speed,
-		&i.Active,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return &i, err
-}
-
 const getProfile = `-- name: GetProfile :one
-SELECT id, name, width_um, height_um, gap_um, paper_type, darkness, speed, active, created_at, updated_at FROM label_profiles WHERE id = ?
+SELECT id, name, width_um, height_um, gap_um, paper_type, darkness, speed, created_at, updated_at FROM label_profiles WHERE id = ?
 `
 
 func (q *Queries) GetProfile(ctx context.Context, id int64) (*LabelProfile, error) {
@@ -134,7 +84,6 @@ func (q *Queries) GetProfile(ctx context.Context, id int64) (*LabelProfile, erro
 		&i.PaperType,
 		&i.Darkness,
 		&i.Speed,
-		&i.Active,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -142,7 +91,7 @@ func (q *Queries) GetProfile(ctx context.Context, id int64) (*LabelProfile, erro
 }
 
 const listProfiles = `-- name: ListProfiles :many
-SELECT id, name, width_um, height_um, gap_um, paper_type, darkness, speed, active, created_at, updated_at FROM label_profiles ORDER BY active DESC, name ASC
+SELECT id, name, width_um, height_um, gap_um, paper_type, darkness, speed, created_at, updated_at FROM label_profiles ORDER BY name ASC, id ASC
 `
 
 func (q *Queries) ListProfiles(ctx context.Context) ([]*LabelProfile, error) {
@@ -163,7 +112,6 @@ func (q *Queries) ListProfiles(ctx context.Context) ([]*LabelProfile, error) {
 			&i.PaperType,
 			&i.Darkness,
 			&i.Speed,
-			&i.Active,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -184,7 +132,7 @@ const updateProfile = `-- name: UpdateProfile :one
 UPDATE label_profiles
 SET name = ?, width_um = ?, height_um = ?, gap_um = ?, paper_type = ?, darkness = ?, speed = ?, updated_at = ?
 WHERE id = ?
-RETURNING id, name, width_um, height_um, gap_um, paper_type, darkness, speed, active, created_at, updated_at
+RETURNING id, name, width_um, height_um, gap_um, paper_type, darkness, speed, created_at, updated_at
 `
 
 type UpdateProfileParams struct {
@@ -221,7 +169,6 @@ func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) (*
 		&i.PaperType,
 		&i.Darkness,
 		&i.Speed,
-		&i.Active,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

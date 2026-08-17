@@ -59,14 +59,27 @@ type Info struct {
 }
 
 var (
-	adapter    = bluetooth.DefaultAdapter
-	enableOnce sync.Once
-	enableErr  error
-	scanMu     sync.Mutex
+	adapter     = bluetooth.DefaultAdapter
+	enableOnce  sync.Once
+	enableErr   error
+	scanMu      sync.Mutex
+	connections sync.Map
 )
 
 func enable() error {
-	enableOnce.Do(func() { enableErr = adapter.Enable() })
+	enableOnce.Do(func() {
+		enableErr = adapter.Enable()
+		if enableErr == nil {
+			adapter.SetConnectHandler(func(device bluetooth.Device, connected bool) {
+				if connected {
+					return
+				}
+				if value, ok := connections.Load(device.Address.String()); ok {
+					value.(*Conn).markDisconnected()
+				}
+			})
+		}
+	})
 	return enableErr
 }
 
@@ -359,12 +372,7 @@ func Connect(opts ConnectOptions) (*Conn, error) {
 		}
 	}
 
-	adapter.SetConnectHandler(func(_ bluetooth.Device, connected bool) {
-		if !connected {
-			c.markDisconnected()
-		}
-	})
-
+	connections.Store(c.address, c)
 	return c, nil
 }
 
@@ -424,6 +432,7 @@ func (c *Conn) markDisconnected() {
 		return
 	}
 	c.disconnected = true
+	connections.Delete(c.address)
 	handlers := append([]func(){}, c.discHandlers...)
 	c.mu.Unlock()
 	for _, h := range handlers {

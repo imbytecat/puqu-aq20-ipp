@@ -13,15 +13,15 @@ import (
 )
 
 func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Message, host string) *goipp.Message {
-	settings, err := s.store.Settings(ctx)
+	target, err := s.store.Printer(ctx, s.printerID)
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
-	profile, err := s.store.ActiveProfile(ctx)
+	profile, err := s.store.Profile(ctx, target.ProfileID)
 	if err != nil {
-		return response(request, goipp.StatusErrorNotAcceptingJobs, "no active label profile")
+		return response(request, goipp.StatusErrorNotAcceptingJobs, "label profile is unavailable")
 	}
-	jobs, err := s.store.Jobs(ctx, 500)
+	jobs, err := s.store.JobsByPrinter(ctx, s.printerID, 500)
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
@@ -36,16 +36,16 @@ func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Messag
 	reasons := "none"
 	if state.Busy {
 		printerState = 4
-	} else if !state.Connected {
+	} else if !state.Connected || target.Enabled != 1 {
 		printerState = 5
 		reasons = "offline"
 	}
 
-	uri := printerURI(host)
+	uri := printerURI(host, s.slug)
 	media := mediaName(profile)
 	formats := []goipp.Value{goipp.String(raster.FormatPWG), goipp.String(raster.FormatJPEG)}
 	commands := "PWGRaster,JPEG"
-	if settings.Airprint == 1 {
+	if target.Airprint == 1 {
 		formats = append(formats, goipp.String(raster.FormatApple))
 		commands += ",AppleRaster"
 	}
@@ -74,24 +74,24 @@ func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Messag
 	attrs.Add(goipp.MakeAttr("printer-uri-supported", goipp.TagURI, goipp.String(uri)))
 	attrs.Add(goipp.MakeAttr("uri-authentication-supported", goipp.TagKeyword, goipp.String("none")))
 	attrs.Add(goipp.MakeAttr("uri-security-supported", goipp.TagKeyword, goipp.String("none")))
-	attrs.Add(goipp.MakeAttr("printer-name", goipp.TagName, goipp.String(settings.IppName)))
+	attrs.Add(goipp.MakeAttr("printer-name", goipp.TagName, goipp.String(target.Name)))
 	attrs.Add(goipp.MakeAttr("printer-info", goipp.TagText, goipp.String("PUQU AQ20 Bluetooth label printer")))
 	attrs.Add(goipp.MakeAttr("printer-location", goipp.TagText, goipp.String("Local Bluetooth bridge")))
 	attrs.Add(goipp.MakeAttr("printer-make-and-model", goipp.TagText, goipp.String("PUQU AQ20 IPP Bridge")))
 	attrs.Add(goipp.MakeAttr("printer-more-info", goipp.TagURI, goipp.String(httpURI(host, "/"))))
-	attrs.Add(goipp.MakeAttr("printer-uuid", goipp.TagURI, goipp.String("urn:uuid:"+settings.PrinterUuid)))
+	attrs.Add(goipp.MakeAttr("printer-uuid", goipp.TagURI, goipp.String("urn:uuid:"+target.Uuid)))
 	attrs.Add(goipp.MakeAttr("printer-device-id", goipp.TagText, goipp.String("MFG:PUQU;MDL:AQ20;CMD:"+commands+";")))
 	attrs.Add(goipp.MakeAttr("printer-state", goipp.TagEnum, goipp.Integer(printerState)))
 	attrs.Add(goipp.MakeAttr("printer-state-reasons", goipp.TagKeyword, goipp.String(reasons)))
 	attrs.Add(goipp.MakeAttr("printer-state-message", goipp.TagText, goipp.String(state.LastError)))
-	attrs.Add(goipp.MakeAttr("printer-is-accepting-jobs", goipp.TagBoolean, goipp.Boolean(len(s.queue) < cap(s.queue))))
+	attrs.Add(goipp.MakeAttr("printer-is-accepting-jobs", goipp.TagBoolean, goipp.Boolean(target.Enabled == 1 && len(s.queue) < cap(s.queue))))
 	attrs.Add(goipp.MakeAttr("queued-job-count", goipp.TagInteger, goipp.Integer(queued)))
 	attrs.Add(goipp.MakeAttr("printer-up-time", goipp.TagInteger, goipp.Integer(time.Since(s.started)/time.Second)))
 	attrs.Add(goipp.MakeAttr("printer-current-time", goipp.TagDateTime, goipp.Time{Time: time.Now()}))
-	attrs.Add(goipp.MakeAttr("printer-config-change-date-time", goipp.TagDateTime, goipp.Time{Time: time.UnixMilli(settings.UpdatedAt)}))
+	attrs.Add(goipp.MakeAttr("printer-config-change-date-time", goipp.TagDateTime, goipp.Time{Time: time.UnixMilli(target.UpdatedAt)}))
 	attrs.Add(goipp.MakeAttr("printer-state-change-date-time", goipp.TagDateTime, goipp.Time{Time: s.started}))
 	attrs.Add(goipp.MakeAttr("printer-state-change-time", goipp.TagInteger, goipp.Integer(0)))
-	attrs.Add(goipp.MakeAttr("printer-config-change-time", goipp.TagInteger, goipp.Integer(max(0, settings.UpdatedAt/1000-s.started.Unix()))))
+	attrs.Add(goipp.MakeAttr("printer-config-change-time", goipp.TagInteger, goipp.Integer(max(0, target.UpdatedAt/1000-s.started.Unix()))))
 	attrs.Add(goipp.MakeAttr("ipp-versions-supported", goipp.TagKeyword, goipp.String("1.1"), goipp.String("2.0")))
 	attrs.Add(goipp.MakeAttr("ipp-features-supported", goipp.TagKeyword, goipp.String("ipp-everywhere")))
 	attrs.Add(goipp.MakeAttr("operations-supported", goipp.TagEnum, operations[0], operations[1:]...))
@@ -174,7 +174,7 @@ func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Messag
 	attrs.Add(goipp.MakeAttr("printer-supply", goipp.TagString, goipp.Binary("index=1;class=supplyThatIsFilled;type=unknown;unit=percent;maxcapacity=100;level=-2;")))
 	attrs.Add(goipp.MakeAttr("printer-supply-description", goipp.TagText, goipp.String("Thermal label media")))
 	attrs.Add(goipp.MakeAttr("printer-supply-info-uri", goipp.TagURI, goipp.String(httpURI(host, "/"))))
-	if settings.Airprint == 1 {
+	if target.Airprint == 1 {
 		attrs.Add(goipp.MakeAttr("urf-supported", goipp.TagKeyword,
 			goipp.String("W8"), goipp.String("SRGB24"), goipp.String("RS203"), goipp.String("DM1")))
 	}

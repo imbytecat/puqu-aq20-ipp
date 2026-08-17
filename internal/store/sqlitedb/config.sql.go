@@ -10,15 +10,6 @@ import (
 	"database/sql"
 )
 
-const clearSelectedDevice = `-- name: ClearSelectedDevice :exec
-UPDATE ble_devices SET selected = 0 WHERE selected = 1
-`
-
-func (q *Queries) ClearSelectedDevice(ctx context.Context) error {
-	_, err := q.db.ExecContext(ctx, clearSelectedDevice)
-	return err
-}
-
 const deleteDevice = `-- name: DeleteDevice :execrows
 DELETE FROM ble_devices WHERE id = ?
 `
@@ -31,12 +22,12 @@ func (q *Queries) DeleteDevice(ctx context.Context, id int64) (int64, error) {
 	return result.RowsAffected()
 }
 
-const getSelectedDevice = `-- name: GetSelectedDevice :one
-SELECT id, native_id, name, address, write_uuid, notify_uuid, selected, last_seen_at, updated_at FROM ble_devices WHERE selected = 1 LIMIT 1
+const getDevice = `-- name: GetDevice :one
+SELECT id, native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at FROM ble_devices WHERE id = ?
 `
 
-func (q *Queries) GetSelectedDevice(ctx context.Context) (*BleDevice, error) {
-	row := q.db.QueryRowContext(ctx, getSelectedDevice)
+func (q *Queries) GetDevice(ctx context.Context, id int64) (*BleDevice, error) {
+	row := q.db.QueryRowContext(ctx, getDevice, id)
 	var i BleDevice
 	err := row.Scan(
 		&i.ID,
@@ -45,35 +36,14 @@ func (q *Queries) GetSelectedDevice(ctx context.Context) (*BleDevice, error) {
 		&i.Address,
 		&i.WriteUuid,
 		&i.NotifyUuid,
-		&i.Selected,
 		&i.LastSeenAt,
 		&i.UpdatedAt,
 	)
 	return &i, err
 }
 
-const getSettings = `-- name: GetSettings :one
-SELECT id, ipp_name, printer_uuid, ipp_listen, admin_listen, advertise, airprint, updated_at FROM app_settings WHERE id = 1
-`
-
-func (q *Queries) GetSettings(ctx context.Context) (*AppSetting, error) {
-	row := q.db.QueryRowContext(ctx, getSettings)
-	var i AppSetting
-	err := row.Scan(
-		&i.ID,
-		&i.IppName,
-		&i.PrinterUuid,
-		&i.IppListen,
-		&i.AdminListen,
-		&i.Advertise,
-		&i.Airprint,
-		&i.UpdatedAt,
-	)
-	return &i, err
-}
-
 const listDevices = `-- name: ListDevices :many
-SELECT id, native_id, name, address, write_uuid, notify_uuid, selected, last_seen_at, updated_at FROM ble_devices ORDER BY selected DESC, last_seen_at DESC, name ASC
+SELECT id, native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at FROM ble_devices ORDER BY last_seen_at DESC, name ASC
 `
 
 func (q *Queries) ListDevices(ctx context.Context) ([]*BleDevice, error) {
@@ -92,7 +62,6 @@ func (q *Queries) ListDevices(ctx context.Context) ([]*BleDevice, error) {
 			&i.Address,
 			&i.WriteUuid,
 			&i.NotifyUuid,
-			&i.Selected,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -109,80 +78,10 @@ func (q *Queries) ListDevices(ctx context.Context) ([]*BleDevice, error) {
 	return items, nil
 }
 
-const selectDevice = `-- name: SelectDevice :execrows
-UPDATE ble_devices SET selected = 1, updated_at = ? WHERE id = ?
-`
-
-type SelectDeviceParams struct {
-	UpdatedAt int64 `json:"updated_at"`
-	ID        int64 `json:"id"`
-}
-
-func (q *Queries) SelectDevice(ctx context.Context, arg SelectDeviceParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, selectDevice, arg.UpdatedAt, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected()
-}
-
-const setPrinterUUID = `-- name: SetPrinterUUID :exec
-UPDATE app_settings SET printer_uuid = ?, updated_at = ? WHERE id = 1
-`
-
-type SetPrinterUUIDParams struct {
-	PrinterUuid string `json:"printer_uuid"`
-	UpdatedAt   int64  `json:"updated_at"`
-}
-
-func (q *Queries) SetPrinterUUID(ctx context.Context, arg SetPrinterUUIDParams) error {
-	_, err := q.db.ExecContext(ctx, setPrinterUUID, arg.PrinterUuid, arg.UpdatedAt)
-	return err
-}
-
-const updateSettings = `-- name: UpdateSettings :one
-UPDATE app_settings
-SET ipp_name = ?, ipp_listen = ?, admin_listen = ?, advertise = ?, airprint = ?, updated_at = ?
-WHERE id = 1
-RETURNING id, ipp_name, printer_uuid, ipp_listen, admin_listen, advertise, airprint, updated_at
-`
-
-type UpdateSettingsParams struct {
-	IppName     string `json:"ipp_name"`
-	IppListen   string `json:"ipp_listen"`
-	AdminListen string `json:"admin_listen"`
-	Advertise   int64  `json:"advertise"`
-	Airprint    int64  `json:"airprint"`
-	UpdatedAt   int64  `json:"updated_at"`
-}
-
-func (q *Queries) UpdateSettings(ctx context.Context, arg UpdateSettingsParams) (*AppSetting, error) {
-	row := q.db.QueryRowContext(ctx, updateSettings,
-		arg.IppName,
-		arg.IppListen,
-		arg.AdminListen,
-		arg.Advertise,
-		arg.Airprint,
-		arg.UpdatedAt,
-	)
-	var i AppSetting
-	err := row.Scan(
-		&i.ID,
-		&i.IppName,
-		&i.PrinterUuid,
-		&i.IppListen,
-		&i.AdminListen,
-		&i.Advertise,
-		&i.Airprint,
-		&i.UpdatedAt,
-	)
-	return &i, err
-}
-
 const upsertDevice = `-- name: UpsertDevice :one
 INSERT INTO ble_devices (
-    native_id, name, address, write_uuid, notify_uuid, selected, last_seen_at, updated_at
-) VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+    native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(native_id) DO UPDATE SET
     name = excluded.name,
     address = excluded.address,
@@ -190,7 +89,7 @@ ON CONFLICT(native_id) DO UPDATE SET
     notify_uuid = excluded.notify_uuid,
     last_seen_at = excluded.last_seen_at,
     updated_at = excluded.updated_at
-RETURNING id, native_id, name, address, write_uuid, notify_uuid, selected, last_seen_at, updated_at
+RETURNING id, native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at
 `
 
 type UpsertDeviceParams struct {
@@ -221,7 +120,6 @@ func (q *Queries) UpsertDevice(ctx context.Context, arg UpsertDeviceParams) (*Bl
 		&i.Address,
 		&i.WriteUuid,
 		&i.NotifyUuid,
-		&i.Selected,
 		&i.LastSeenAt,
 		&i.UpdatedAt,
 	)

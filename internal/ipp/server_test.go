@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,119 @@ func (f *fakePrinter) Print(_ context.Context, jobs []printer.Job, _ printer.Set
 func (f *fakePrinter) Cancel() error          { return nil }
 func (f *fakePrinter) Status() printer.Status { return printer.Status{Connected: true} }
 
+func TestDiscoveryUsesPortableNameAndAdminPort(t *testing.T) {
+	configured := &store.Printer{Name: "仓库标签", Slug: "warehouse", Uuid: "12345678-abcd"}
+	if got := advertisedName(configured); got != "PUQU warehouse (123456)" {
+		t.Fatalf("advertised name = %q", got)
+	}
+	if got := advertisedHTTPURL("127.0.0.1:18080"); !strings.HasSuffix(got, ":18080/") {
+		t.Fatalf("admin URL = %q", got)
+	}
+}
+
+type fakeFleet struct {
+	mu   sync.Mutex
+	jobs map[int64][]printer.Job
+}
+
+func (f *fakeFleet) Print(_ context.Context, id int64, jobs []printer.Job, _ printer.Settings) (printer.Result, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.jobs[id] = append(f.jobs[id], jobs...)
+	return printer.Result{Jobs: len(jobs)}, nil
+}
+func (f *fakeFleet) Cancel(int64) error          { return nil }
+func (f *fakeFleet) Status(int64) printer.Status { return printer.Status{Connected: true} }
+
+func TestGatewayIsolatesPrinterQueuesAndJobs(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	configured, err := st.Printers(ctx)
+	if err != nil || len(configured) != 1 {
+		t.Fatalf("printers = %+v, %v", configured, err)
+	}
+	second, err := st.CreatePrinter(ctx, store.PrinterInput{
+		Name: "Returns", Slug: "returns", Driver: store.DriverPUQUAQ20,
+		ProfileID: configured[0].ProfileID, Enabled: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fleet := &fakeFleet{jobs: make(map[int64][]printer.Job)}
+	gateway := NewGateway(st, fleet, ":8631", "127.0.0.1:8080", nil)
+	gateway.mu.Lock()
+	gateway.root = ctx
+	gateway.mu.Unlock()
+	if err := gateway.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(gateway.Handler())
+	defer httpServer.Close()
+
+	firstJob := submitPrint(t, httpServer.URL+"/ipp/"+configured[0].Slug, configured[0].Slug, 21)
+	secondJob := submitPrint(t, httpServer.URL+"/ipp/"+second.Slug, second.Slug, 22)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		a, _ := st.Job(ctx, int64(firstJob))
+		b, _ := st.Job(ctx, int64(secondJob))
+		if a != nil && b != nil && a.State == "completed" && b.State == "completed" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	fleet.mu.Lock()
+	if len(fleet.jobs[configured[0].ID]) != 1 || len(fleet.jobs[second.ID]) != 1 {
+		t.Fatalf("fleet jobs = %+v", fleet.jobs)
+	}
+	fleet.mu.Unlock()
+
+	request := baseRequest(goipp.OpGetJobAttributes, 23)
+	request.Operation.Add(goipp.MakeAttr("printer-uri", goipp.TagURI, goipp.String("ipp://localhost/ipp/"+configured[0].Slug)))
+	request.Operation.Add(goipp.MakeAttr("job-id", goipp.TagInteger, goipp.Integer(secondJob)))
+	encoded, err := request.EncodeBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := postIPP(t, httpServer.URL+"/ipp/"+configured[0].Slug, encoded)
+	if goipp.Status(response.Code) != goipp.StatusErrorNotFound {
+		t.Fatalf("cross-printer job lookup status = %s", goipp.Status(response.Code))
+	}
+}
+
+func submitPrint(t *testing.T, endpoint, slug string, requestID uint32) int {
+	t.Helper()
+	request := baseRequest(goipp.OpPrintJob, requestID)
+	request.Operation.Add(goipp.MakeAttr("printer-uri", goipp.TagURI, goipp.String("ipp://localhost/ipp/"+slug)))
+	request.Operation.Add(goipp.MakeAttr("document-format", goipp.TagMimeType, goipp.String(raster.FormatPWG)))
+	encoded, err := request.EncodeBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := postIPP(t, endpoint, append(encoded, whitePWGRaster(320, 240)...))
+	if goipp.Status(response.Code) != goipp.StatusOk {
+		t.Fatalf("print status = %s", goipp.Status(response.Code))
+	}
+	id, ok := integerFrom(response.Job, "job-id")
+	if !ok {
+		t.Fatal("response missing job-id")
+	}
+	return id
+}
+
+func newTestServer(t *testing.T, ctx context.Context, st *store.Store, device Printer) (*Server, *store.Printer) {
+	t.Helper()
+	printers, err := st.Printers(ctx)
+	if err != nil || len(printers) != 1 {
+		t.Fatalf("printers = %+v, %v", printers, err)
+	}
+	return New(st, device, printers[0].ID, printers[0].Slug, nil), printers[0]
+}
+
 func TestPrintJobEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -42,7 +156,7 @@ func TestPrintJobEndToEnd(t *testing.T) {
 	}
 	defer st.Close()
 	device := &fakePrinter{}
-	srv := New(st, device, nil)
+	srv, _ := newTestServer(t, ctx, st, device)
 	go srv.worker(ctx)
 	httpServer := httptest.NewServer(srv.Handler())
 	defer httpServer.Close()
@@ -89,7 +203,7 @@ func TestGetPrinterAttributes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	srv := New(st, &fakePrinter{}, nil)
+	srv, _ := newTestServer(t, ctx, st, &fakePrinter{})
 	httpServer := httptest.NewServer(srv.Handler())
 	defer httpServer.Close()
 	request := baseRequest(goipp.OpGetPrinterAttributes, 9)
@@ -119,7 +233,7 @@ func TestRejectsZeroRequestID(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	srv := New(st, &fakePrinter{}, nil)
+	srv, _ := newTestServer(t, ctx, st, &fakePrinter{})
 	httpServer := httptest.NewServer(srv.Handler())
 	defer httpServer.Close()
 	request := baseRequest(goipp.OpGetPrinterAttributes, 0)
@@ -140,12 +254,13 @@ func TestAirPrintAttributesCanBeEnabled(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err := st.UpdateSettings(ctx, store.SettingsUpdate{
-		IPPName: "PUQU", IPPListen: ":8631", AdminListen: "127.0.0.1:8080", Advertise: true, AirPrint: true,
+	srv, configured := newTestServer(t, ctx, st, &fakePrinter{})
+	if _, err := st.UpdatePrinter(ctx, configured.ID, store.PrinterInput{
+		Name: configured.Name, Driver: configured.Driver, ProfileID: configured.ProfileID,
+		Enabled: true, Advertise: true, AirPrint: true,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	srv := New(st, &fakePrinter{}, nil)
 	httpServer := httptest.NewServer(srv.Handler())
 	defer httpServer.Close()
 	request := baseRequest(goipp.OpGetPrinterAttributes, 11)
@@ -168,7 +283,7 @@ func TestRequestedPrinterAttributesAreFiltered(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	srv := New(st, &fakePrinter{}, nil)
+	srv, _ := newTestServer(t, ctx, st, &fakePrinter{})
 	httpServer := httptest.NewServer(srv.Handler())
 	defer httpServer.Close()
 	request := baseRequest(goipp.OpGetPrinterAttributes, 12)
