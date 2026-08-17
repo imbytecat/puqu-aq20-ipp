@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useParams } from "@tanstack/react-router";
+import copyToClipboard from "copy-to-clipboard";
 import { api } from "./api";
 import type { Printer, PrinterInput, Profile, ProfileInput, Status } from "./types";
 
-const statusKey = ["status"] as const;
+const statusQuery = queryOptions({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2500 });
 const blankProfile: ProfileInput = {
   name: "",
   widthMm: 40,
@@ -16,14 +17,14 @@ const blankProfile: ProfileInput = {
 };
 
 function useStatus() {
-  return useQuery({ queryKey: statusKey, queryFn: api.status, refetchInterval: 2500 });
+  return useQuery(statusQuery);
 }
 
 function useRefreshMutation<TData, TVariables = void>(mutationFn: (variables: TVariables) => Promise<TData>) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: statusKey }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: statusQuery.queryKey }),
   });
 }
 
@@ -132,30 +133,34 @@ export function PrinterPage() {
   const remove = useRefreshMutation(() => api.deletePrinter(id));
   const connect = useRefreshMutation(() => api.connect(id));
   const test = useRefreshMutation(() => api.testPrint(id));
+  const copy = useMutation({ mutationFn: copyText });
   if (!status.data) return <Loading />;
   if (!configured || !draft) return <Empty>打印机不存在。</Empty>;
   const printerName = configured.name;
   const profile = status.data.profiles.find((item) => item.id === configured.profileId);
   const device = status.data.devices.find((item) => item.id === configured.deviceId);
+  const uri = printerURI(status.data, configured);
   async function removePrinter() {
     if (!window.confirm(`删除打印机“${printerName}”及其任务记录？`)) return;
     await remove.mutateAsync();
     await navigate({ to: "/printers" });
   }
   return (
-    <Page title={configured.name} description={printerURI(status.data, configured)} back="/printers">
+    <Page title={configured.name} description={uri} back="/printers">
       <div className="metrics compact">
         <Metric label="连接状态" value={printerState(configured)} detail={configured.status.info?.name || configured.status.lastError || "尚未绑定设备"} />
         <Metric label="物理设备" value={device?.name || "未分配"} detail={device?.address || "可先在设备页添加"} />
         <Metric label="标签规格" value={profile ? `${profile.widthMm} × ${profile.heightMm} mm` : "不可用"} detail={profile?.name || "请选择规格"} />
         <Metric label="队列" value={`${configured.queueDepth} 等待`} detail={`UUID ${configured.uuid.slice(0, 8)}`} />
       </div>
-      <Panel title="队列操作" description="重连和测试打印只作用于当前打印机。">
+      <Panel title="IPP 地址与队列操作" description="在 CUPS 或系统打印机中使用此地址。">
+        <pre><code>{uri}</code></pre>
         <div className="actions">
-          <Button busy={connect.isPending} onClick={() => connect.mutate()}>重新连接</Button>
+          <Button busy={copy.isPending} onClick={() => copy.mutate(uri)}>复制 IPP 地址</Button>
+          <Button kind="secondary" busy={connect.isPending} onClick={() => connect.mutate()}>重新连接</Button>
           <Button kind="secondary" busy={test.isPending} disabled={!configured.status.connected} onClick={() => test.mutate()}>打印测试标签</Button>
         </div>
-        <Feedback error={connect.error || test.error} success={connect.isSuccess ? "已请求重新连接。" : test.isSuccess ? "测试标签已发送。" : ""} />
+        <Feedback error={copy.error || connect.error || test.error} success={copy.isSuccess ? "IPP 地址已复制。" : connect.isSuccess ? "已请求重新连接。" : test.isSuccess ? "测试标签已发送。" : ""} />
       </Panel>
       <Panel title="打印机设置" description="队列名称创建后保持不变，避免操作系统保存的 IPP 地址失效。">
         <PrinterForm initial={draft} status={status.data} currentId={id} fixedSlug saving={update.isPending} onChange={setDraft} onSave={(value) => update.mutateAsync(value)} />
@@ -339,6 +344,13 @@ function StatusDot({ printer }: { printer: Printer }) { return <span className={
 function toPrinterInput(value: Printer): PrinterInput { return { name: value.name, slug: value.slug, driver: value.driver, deviceId: value.deviceId, profileId: value.profileId, enabled: value.enabled }; }
 function printerState(value: Printer) { if (!value.enabled) return "已停用"; if (value.status.connected) return value.status.busy ? "打印中" : "已连接"; return value.status.connecting ? "连接中" : "离线"; }
 function printerURI(status: Status, printer: Printer) { const port = status.config.ippListen.split(":").at(-1); return `ipp://${window.location.hostname}:${port}/ipp/${printer.slug}`; }
+async function copyText(value: string) {
+  const copied = await copyToClipboard(value, {
+    fallbackToPrompt: true,
+    message: "按 #{key} 复制 IPP 地址，然后按 Enter",
+  });
+  if (!copied) throw new Error("无法复制 IPP 地址");
+}
 function jobState(value: string) { return ({ pending: "等待", processing: "打印中", completed: "完成", canceled: "已取消", aborted: "失败" } as Record<string, string>)[value] || value; }
 function formatBytes(bytes: number) { return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KiB`; }
 function message(cause: unknown) { return cause instanceof Error ? cause.message : String(cause); }

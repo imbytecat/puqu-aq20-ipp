@@ -1,4 +1,4 @@
-import { createRootRoute, createRoute, createRouter } from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, Outlet } from "@tanstack/react-router";
 import {
   DashboardPage,
   DevicesPage,
@@ -12,8 +12,9 @@ import {
 
 const rootRoute = createRootRoute({ component: RootLayout });
 const dashboardRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: DashboardPage });
-const printersRoute = createRoute({ getParentRoute: () => rootRoute, path: "/printers", component: PrintersPage });
-const printerRoute = createRoute({ getParentRoute: () => rootRoute, path: "/printers/$printerId", component: PrinterPage });
+const printersRoute = createRoute({ getParentRoute: () => rootRoute, path: "/printers", component: Outlet });
+const printersIndexRoute = createRoute({ getParentRoute: () => printersRoute, path: "/", component: PrintersPage });
+const printerRoute = createRoute({ getParentRoute: () => printersRoute, path: "$printerId", component: PrinterPage });
 const devicesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/devices", component: DevicesPage });
 const profilesRoute = createRoute({ getParentRoute: () => rootRoute, path: "/profiles", component: ProfilesPage });
 const jobsRoute = createRoute({ getParentRoute: () => rootRoute, path: "/jobs", component: JobsPage });
@@ -21,8 +22,7 @@ const runtimeRoute = createRoute({ getParentRoute: () => rootRoute, path: "/runt
 
 const routeTree = rootRoute.addChildren([
   dashboardRoute,
-  printersRoute,
-  printerRoute,
+  printersRoute.addChildren([printersIndexRoute, printerRoute]),
   devicesRoute,
   profilesRoute,
   jobsRoute,
