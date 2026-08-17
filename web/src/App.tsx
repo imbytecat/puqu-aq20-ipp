@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
-import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient, type UseMutationResult } from "@tanstack/react-query";
 import { Link, Outlet, useNavigate, useParams } from "@tanstack/react-router";
 import copyToClipboard from "copy-to-clipboard";
+import { Check, Copy, Laptop, MonitorCog, Terminal, type LucideIcon } from "lucide-react";
 import { api } from "./api";
 import type { Printer, PrinterInput, Profile, ProfileInput, Status } from "./types";
+
+type CopyMutation = UseMutationResult<void, Error, string>;
 
 const statusQuery = queryOptions({ queryKey: ["status"], queryFn: api.status, refetchInterval: 2500 });
 const blankProfile: ProfileInput = {
@@ -140,6 +143,7 @@ export function PrinterPage() {
   const profile = status.data.profiles.find((item) => item.id === configured.profileId);
   const device = status.data.devices.find((item) => item.id === configured.deviceId);
   const uri = printerURI(status.data, configured);
+  const commands = installCommands(configured, uri);
   async function removePrinter() {
     if (!window.confirm(`删除打印机“${printerName}”及其任务记录？`)) return;
     await remove.mutateAsync();
@@ -153,14 +157,17 @@ export function PrinterPage() {
         <Metric label="标签规格" value={profile ? `${profile.widthMm} × ${profile.heightMm} mm` : "不可用"} detail={profile?.name || "请选择规格"} />
         <Metric label="队列" value={`${configured.queueDepth} 等待`} detail={`UUID ${configured.uuid.slice(0, 8)}`} />
       </div>
-      <Panel title="IPP 地址与队列操作" description="在 CUPS 或系统打印机中使用此地址。">
-        <pre><code>{uri}</code></pre>
+      <Panel title="安装到系统" description="复制对应系统的安装命令；自动发现未启用。">
+        <div className="install-commands">
+          <InstallCommand icon={Terminal} label="Linux" detail="CUPS · IPP Everywhere" value={commands.linux} copy={copy} />
+          <InstallCommand icon={Laptop} label="macOS" detail="CUPS · Driverless" value={commands.macos} copy={copy} />
+          <InstallCommand icon={MonitorCog} label="Windows" detail="Windows 10/11 · Internet Printing Client" value={commands.windows} copy={copy} />
+        </div>
         <div className="actions">
-          <Button busy={copy.isPending} onClick={() => copy.mutate(uri)}>复制 IPP 地址</Button>
           <Button kind="secondary" busy={connect.isPending} onClick={() => connect.mutate()}>重新连接</Button>
           <Button kind="secondary" busy={test.isPending} disabled={!configured.status.connected} onClick={() => test.mutate()}>打印测试标签</Button>
         </div>
-        <Feedback error={copy.error || connect.error || test.error} success={copy.isSuccess ? "IPP 地址已复制。" : connect.isSuccess ? "已请求重新连接。" : test.isSuccess ? "测试标签已发送。" : ""} />
+        <Feedback error={copy.error || connect.error || test.error} success={connect.isSuccess ? "已请求重新连接。" : test.isSuccess ? "测试标签已发送。" : ""} />
       </Panel>
       <Panel title="打印机设置" description="队列名称创建后保持不变，避免操作系统保存的 IPP 地址失效。">
         <PrinterForm initial={draft} status={status.data} currentId={id} fixedSlug saving={update.isPending} onChange={setDraft} onSave={(value) => update.mutateAsync(value)} />
@@ -336,6 +343,18 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function NumberField({ label, value, set, min, max, step = 1 }: { label: string; value: number; set: (value: number) => void; min: number; max: number; step?: number }) { return <Field label={label}><input type="number" value={value} min={min} max={max} step={step} onChange={(event) => set(Number(event.target.value))} required /></Field>; }
 function Toggle({ checked, set, children }: { checked: boolean; set: (value: boolean) => void; children: React.ReactNode }) { return <label className="toggle"><input type="checkbox" checked={checked} onChange={(event) => set(event.target.checked)} /><span />{children}</label>; }
 function Button({ busy, kind = "primary", children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { busy?: boolean; kind?: "primary" | "secondary" | "danger" | "ghost-danger" }) { return <button type={props.type || "button"} className={`button ${kind}`} disabled={busy || props.disabled} {...props}>{busy ? "处理中…" : children}</button>; }
+function InstallCommand({ icon: Icon, label, detail, value, copy }: { icon: LucideIcon; label: string; detail: string; value: string; copy: CopyMutation }) {
+  const copied = copy.isSuccess && copy.variables === value;
+  return <div className="install-command">
+    <div className="install-command-head">
+      <div className="install-command-title"><Icon size={18} aria-hidden="true" /><div><strong>{label}</strong><small>{detail}</small></div></div>
+      <Button kind="secondary" busy={copy.isPending && copy.variables === value} onClick={() => copy.mutate(value)}>
+        {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}{copied ? "已复制" : "复制"}
+      </Button>
+    </div>
+    <code>{value}</code>
+  </div>;
+}
 function Feedback({ error, success }: { error?: unknown; success?: string }) { if (!error && !success) return null; return <div className={`message ${error ? "error" : "success"}`} role="status">{error ? message(error) : success}</div>; }
 function Empty({ children }: { children: React.ReactNode }) { return <p className="empty">{children}</p>; }
 function Loading() { return <div className="loading">正在读取打印服务状态…</div>; }
@@ -344,12 +363,21 @@ function StatusDot({ printer }: { printer: Printer }) { return <span className={
 function toPrinterInput(value: Printer): PrinterInput { return { name: value.name, slug: value.slug, driver: value.driver, deviceId: value.deviceId, profileId: value.profileId, enabled: value.enabled }; }
 function printerState(value: Printer) { if (!value.enabled) return "已停用"; if (value.status.connected) return value.status.busy ? "打印中" : "已连接"; return value.status.connecting ? "连接中" : "离线"; }
 function printerURI(status: Status, printer: Printer) { const port = status.config.ippListen.split(":").at(-1); return `ipp://${window.location.hostname}:${port}/ipp/${printer.slug}`; }
+function installCommands(printer: Printer, uri: string) {
+  const cups = `sudo lpadmin -p ${shellQuote(printer.slug)} -E -v ${shellQuote(uri)} -m everywhere`;
+  return {
+    linux: cups,
+    macos: cups,
+    windows: `rundll32.exe printui.dll,PrintUIEntry /in /n \"${uri.replace(/^ipp:/, "http:")}\"`,
+  };
+}
+function shellQuote(value: string) { return `'${value.replaceAll("'", `'\"'\"'`)}'`; }
 async function copyText(value: string) {
   const copied = await copyToClipboard(value, {
     fallbackToPrompt: true,
-    message: "按 #{key} 复制 IPP 地址，然后按 Enter",
+    message: "按 #{key} 复制安装命令，然后按 Enter",
   });
-  if (!copied) throw new Error("无法复制 IPP 地址");
+  if (!copied) throw new Error("无法复制安装命令");
 }
 function jobState(value: string) { return ({ pending: "等待", processing: "打印中", completed: "完成", canceled: "已取消", aborted: "失败" } as Record<string, string>)[value] || value; }
 function formatBytes(bytes: number) { return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KiB`; }
