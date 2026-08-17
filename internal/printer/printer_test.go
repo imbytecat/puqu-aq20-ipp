@@ -6,6 +6,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/imbytecat/puqu-ipp-bridge/internal/ble"
 )
@@ -16,6 +17,8 @@ type fakeLink struct {
 	connected    bool
 	onData       func([]byte)
 	onDisconnect func()
+	writeErr     error
+	writeAttempt chan struct{}
 }
 
 func newFakeLink() *fakeLink { return &fakeLink{connected: true} }
@@ -23,6 +26,15 @@ func newFakeLink() *fakeLink { return &fakeLink{connected: true} }
 func (f *fakeLink) Write(data []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.writeAttempt != nil {
+		close(f.writeAttempt)
+		f.writeAttempt = nil
+	}
+	if f.writeErr != nil {
+		err := f.writeErr
+		f.writeErr = nil
+		return err
+	}
 	f.writes = append(f.writes, append([]byte(nil), data...))
 	return nil
 }
@@ -53,6 +65,7 @@ func TestPrintSequence(t *testing.T) {
 		t.Fatalf("result = %+v", result)
 	}
 	want := [][]byte{
+		{0x3a, 0x5a, 0, 0, 0, 0, 0, 0x0a},
 		{0x3a, 0x5a, 0x53, 0x21, 0, 0, 0, 0xca},
 		{0x3a, 0x5a, 0, 0, 0, 0, 0, 0x3a},
 		{0x3a, 1, 3, 0, 3, 0, 0, 0x15},
@@ -67,6 +80,53 @@ func TestPrintSequence(t *testing.T) {
 		if !bytes.Equal(writes[i], want[i]) {
 			t.Errorf("write[%d] = % x, want % x", i, writes[i], want[i])
 		}
+	}
+}
+func TestPrintStalePreflightIsRetryable(t *testing.T) {
+	fake := newFakeLink()
+	fake.writeErr = ble.ErrStaleGatt
+	p := New(fake, nil)
+
+	_, err := p.Print(context.Background(), []Job{{WidthBytes: 1, HeightPx: 1, Data: []byte{0xff}}}, Settings{})
+	if !errors.Is(err, ErrRetryableLink) {
+		t.Fatalf("error = %v, want ErrRetryableLink", err)
+	}
+	if writes := fake.recorded(); len(writes) != 0 {
+		t.Fatalf("preflight failure wrote printer data: % x", writes)
+	}
+}
+
+func TestManagerRetriesOnReplacementConnection(t *testing.T) {
+	stale := newFakeLink()
+	stale.writeErr = ble.ErrStaleGatt
+	stale.writeAttempt = make(chan struct{})
+	attempt := stale.writeAttempt
+	fresh := newFakeLink()
+	manager := NewManager()
+	manager.mu.Lock()
+	manager.current = New(stale, nil)
+	manager.mu.Unlock()
+
+	go func() {
+		<-attempt
+		manager.mu.Lock()
+		manager.current = New(fresh, nil)
+		manager.notifyChangedLocked()
+		manager.mu.Unlock()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result, err := manager.Print(ctx, []Job{{WidthBytes: 1, HeightPx: 1, Data: []byte{0xff}}}, Settings{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Jobs != 1 || result.Bytes != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	writes := fresh.recorded()
+	if len(writes) == 0 || !bytes.Equal(writes[0], []byte{0x3a, 0x5a, 0, 0, 0, 0, 0, 0x0a}) {
+		t.Fatalf("replacement writes = % x", writes)
 	}
 }
 

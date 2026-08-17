@@ -86,6 +86,12 @@ func (p *Printer) Print(ctx context.Context, jobs []Job, settings Settings) (Res
 			return Result{}, fmt.Errorf("bitmap length %d does not match %dx%d", len(job.Data), job.WidthBytes, job.HeightPx)
 		}
 	}
+	if err := p.write(ctx, puqu.ReadState()); err != nil {
+		if errors.Is(err, ble.ErrStaleGatt) {
+			return Result{}, fmt.Errorf("%w: %v", ErrRetryableLink, err)
+		}
+		return Result{}, err
+	}
 
 	frame := puqu.DeviceDetails(puqu.DeviceSettings{
 		Darkness: settings.Darkness, Speed: settings.Speed, PaperType: settings.PaperType, Temporary: true,

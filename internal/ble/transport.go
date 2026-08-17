@@ -6,6 +6,7 @@ package ble
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -59,6 +60,8 @@ type Info struct {
 }
 
 var (
+	ErrStaleGatt = errors.New("stale GATT connection")
+
 	adapter     = bluetooth.DefaultAdapter
 	enableOnce  sync.Once
 	enableErr   error
@@ -501,10 +504,11 @@ func (c *Conn) Write(data []byte) error {
 	return nil
 }
 func (c *Conn) handleWriteError(err error) error {
-	if isStaleGattError(err) {
-		c.markDisconnected()
+	if !isStaleGattError(err) {
+		return err
 	}
-	return err
+	c.markDisconnected()
+	return fmt.Errorf("%w: %v", ErrStaleGatt, err)
 }
 
 // Disconnect closes the link.

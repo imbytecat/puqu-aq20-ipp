@@ -3,6 +3,7 @@
 package ble
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/godbus/dbus/v5"
@@ -15,8 +16,12 @@ func TestStaleBlueZWriteDisconnectsLink(t *testing.T) {
 
 	message := `Method "WriteValue" with signature "aya{sv}" on interface "org.bluez.GattCharacteristic1" doesn't exist`
 	err := dbus.Error{Name: "org.freedesktop.DBus.Error.UnknownMethod", Body: []any{message}}
-	if got := conn.handleWriteError(err); got.Error() != message {
-		t.Fatalf("error = %q, want %q", got, message)
+	got := conn.handleWriteError(err)
+	if !errors.Is(got, ErrStaleGatt) {
+		t.Fatalf("error = %v, want ErrStaleGatt", got)
+	}
+	if got.Error() != ErrStaleGatt.Error()+": "+message {
+		t.Fatalf("error = %q", got)
 	}
 	if conn.IsConnected() {
 		t.Fatal("stale GATT method should invalidate the connection")
