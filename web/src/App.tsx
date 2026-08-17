@@ -102,7 +102,7 @@ export function App() {
 
 
   return (
-    <div className="shell">
+    <main className="shell">
       <header>
         <div>
           <p className="eyebrow">PUQU AQ20</p>
@@ -234,7 +234,7 @@ export function App() {
       </div>
 
       <footer>Printer UUID {status.settings.printerUuid}</footer>
-    </div>
+    </main>
   );
 }
 
