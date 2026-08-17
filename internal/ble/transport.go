@@ -492,13 +492,19 @@ func (c *Conn) Write(data []byte) error {
 			_, err = c.writeChar.Write(slice)
 		}
 		if err != nil {
-			return err
+			return c.handleWriteError(err)
 		}
 		if c.packetInterval > 0 {
 			time.Sleep(c.packetInterval)
 		}
 	}
 	return nil
+}
+func (c *Conn) handleWriteError(err error) error {
+	if isStaleGattError(err) {
+		c.markDisconnected()
+	}
+	return err
 }
 
 // Disconnect closes the link.
