@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brutella/dnssd"
+	"github.com/grandcat/zeroconf"
 
 	"github.com/imbytecat/puqu-aq20-ipp/internal/raster"
 	"github.com/imbytecat/puqu-aq20-ipp/internal/store"
@@ -33,7 +33,6 @@ func (d *discovery) Reload() {
 }
 
 func (d *discovery) Run(ctx context.Context) {
-	var lastInterfaces string
 	for {
 		settings, err := d.store.Settings(ctx)
 		if err != nil {
@@ -49,15 +48,6 @@ func (d *discovery) Run(ctx context.Context) {
 			}
 			continue
 		}
-
-		port, err := listenPort(settings.IppListen)
-		if err != nil {
-			d.logger.Error("invalid IPP listen address", "error", err)
-			if !wait(ctx, d.reload, 5*time.Second) {
-				return
-			}
-			continue
-		}
 		profile, err := d.store.ActiveProfile(ctx)
 		if err != nil {
 			d.logger.Error("load active profile for discovery", "error", err)
@@ -66,30 +56,32 @@ func (d *discovery) Run(ctx context.Context) {
 			}
 			continue
 		}
-		responder, err := dnssd.NewResponder()
+		port, err := listenPort(settings.IppListen)
 		if err != nil {
-			d.logger.Error("create DNS-SD responder", "error", err)
+			d.logger.Error("invalid IPP listen address", "error", err)
 			if !wait(ctx, d.reload, 5*time.Second) {
 				return
 			}
 			continue
 		}
-		pdl := raster.FormatPWG
+
+		formats := raster.FormatPWG + "," + raster.FormatJPEG
+		serviceType := "_ipp._tcp"
+		urf := ""
 		if settings.Airprint == 1 {
-			pdl += "," + raster.FormatApple
+			formats += "," + raster.FormatApple
+			serviceType += ",_universal"
+			urf = "W8,SRGB24,RS203,DM1"
 		}
-		text := map[string]string{
-			"txtvers": "1", "qtotal": "1", "rp": "ipp/print", "ty": "PUQU AQ20",
-			"product": "(PUQU AQ20 IPP Bridge)", "pdl": pdl, "Color": "F", "Duplex": "F",
-			"Copies": "T", "UUID": settings.PrinterUuid, "note": fmtProfile(profile),
+		text := []string{
+			"txtvers=1", "qtotal=1", "rp=ipp/print", "ty=PUQU AQ20",
+			"product=(PUQU AQ20 IPP Bridge)", "pdl=" + formats, "Color=F", "Duplex=F", "Copies=T",
+			"UUID=" + settings.PrinterUuid, "note=" + fmtProfile(profile), "adminurl=" + adminURL(settings.AdminListen),
 		}
-		if settings.Airprint == 1 {
-			text["URF"] = "W8,SRGB24,RS203,DM1"
+		if urf != "" {
+			text = append(text, "URF="+urf)
 		}
-		service, err := dnssd.NewService(dnssd.Config{Name: settings.IppName, Type: "_ipp._tcp", Port: port, Text: text})
-		if err == nil {
-			_, err = responder.Add(service)
-		}
+		responder, err := zeroconf.Register(advertisedName(settings), serviceType, "local.", port, text, nil)
 		if err != nil {
 			d.logger.Error("register DNS-SD printer", "error", err)
 			if !wait(ctx, d.reload, 5*time.Second) {
@@ -98,36 +90,35 @@ func (d *discovery) Run(ctx context.Context) {
 			continue
 		}
 
-		runCtx, cancel := context.WithCancel(ctx)
-		done := make(chan error, 1)
-		go func() { done <- responder.Respond(runCtx) }()
-		lastInterfaces = interfaceSignature()
+		interfaces := interfaceSignature()
 		ticker := time.NewTicker(5 * time.Second)
 		restart := false
 		for !restart {
 			select {
 			case <-ctx.Done():
-				cancel()
+				responder.Shutdown()
 				ticker.Stop()
 				return
 			case <-d.reload:
 				restart = true
-			case err := <-done:
-				if err != nil && ctx.Err() == nil {
-					d.logger.Error("DNS-SD responder stopped", "error", err)
-				}
-				restart = true
 			case <-ticker.C:
-				now := interfaceSignature()
-				if now != lastInterfaces {
-					lastInterfaces = now
+				if current := interfaceSignature(); current != interfaces {
+					interfaces = current
 					restart = true
 				}
 			}
 		}
 		ticker.Stop()
-		cancel()
+		responder.Shutdown()
 	}
+}
+
+func advertisedName(settings *store.Settings) string {
+	suffix := settings.PrinterUuid
+	if len(suffix) > 6 {
+		suffix = suffix[:6]
+	}
+	return settings.IppName + " (" + suffix + ")"
 }
 
 func listenPort(address string) (int, error) {

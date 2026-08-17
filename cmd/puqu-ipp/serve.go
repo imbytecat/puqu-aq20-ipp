@@ -71,6 +71,12 @@ func runDaemon(ctx context.Context, dataPath string) error {
 	if err != nil {
 		return err
 	}
+	if err := store.ValidateSettings(store.SettingsUpdate{
+		IPPName: settings.IppName, IPPListen: settings.IppListen, AdminListen: settings.AdminListen,
+		Advertise: settings.Advertise == 1, AirPrint: settings.Airprint == 1,
+	}); err != nil {
+		return err
+	}
 	ipp := ippserver.New(st, manager, logger)
 	ipp.Start(ctx)
 	adminServer := admin.New(st, manager, ipp, web.Handler(), version)

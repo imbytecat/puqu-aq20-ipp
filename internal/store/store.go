@@ -7,8 +7,10 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -132,21 +134,55 @@ type SettingsUpdate struct {
 	AirPrint    bool
 }
 
-func (s *Store) UpdateSettings(ctx context.Context, update SettingsUpdate) (*Settings, error) {
+func ValidateSettings(update SettingsUpdate) error {
 	update.IPPName = strings.TrimSpace(update.IPPName)
 	update.IPPListen = strings.TrimSpace(update.IPPListen)
 	update.AdminListen = strings.TrimSpace(update.AdminListen)
 	if update.IPPName == "" || update.IPPListen == "" || update.AdminListen == "" {
-		return nil, errors.New("IPP name and listen addresses are required")
+		return errors.New("IPP name and listen addresses are required")
+	}
+	if err := validateListenAddress(update.IPPListen, false); err != nil {
+		return fmt.Errorf("invalid IPP listen address: %w", err)
+	}
+	if err := validateListenAddress(update.AdminListen, true); err != nil {
+		return fmt.Errorf("invalid admin listen address: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) UpdateSettings(ctx context.Context, update SettingsUpdate) (*Settings, error) {
+	update.IPPName = strings.TrimSpace(update.IPPName)
+	update.IPPListen = strings.TrimSpace(update.IPPListen)
+	update.AdminListen = strings.TrimSpace(update.AdminListen)
+	if err := ValidateSettings(update); err != nil {
+		return nil, err
 	}
 	return s.q.UpdateSettings(ctx, sqlitedb.UpdateSettingsParams{
-		IppName:     update.IPPName,
-		IppListen:   update.IPPListen,
-		AdminListen: update.AdminListen,
-		Advertise:   boolInt(update.Advertise),
-		Airprint:    boolInt(update.AirPrint),
-		UpdatedAt:   unixMillis(time.Now()),
+		IppName: update.IPPName, IppListen: update.IPPListen, AdminListen: update.AdminListen,
+		Advertise: boolInt(update.Advertise), Airprint: boolInt(update.AirPrint), UpdatedAt: unixMillis(time.Now()),
 	})
+}
+
+func validateListenAddress(address string, loopbackOnly bool) error {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return errors.New("port must be between 1 and 65535")
+	}
+	if !loopbackOnly {
+		return nil
+	}
+	if strings.EqualFold(host, "localhost") {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return errors.New("admin listener must use localhost or a loopback IP")
+	}
+	return nil
 }
 
 func (s *Store) Devices(ctx context.Context) ([]*Device, error) {

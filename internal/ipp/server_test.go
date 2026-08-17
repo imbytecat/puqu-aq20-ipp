@@ -105,8 +105,82 @@ func TestGetPrinterAttributes(t *testing.T) {
 	if value := stringFrom(response.Printer, "document-format-default"); value != raster.FormatPWG {
 		t.Fatalf("document format = %q", value)
 	}
+	if !containsString(response.Printer, "document-format-supported", raster.FormatJPEG) {
+		t.Fatal("JPEG format is not advertised")
+	}
 	if value, ok := integerFrom(response.Printer, "printer-state"); !ok || value != 3 {
 		t.Fatalf("printer-state = %d, ok=%v", value, ok)
+	}
+}
+func TestRejectsZeroRequestID(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	srv := New(st, &fakePrinter{}, nil)
+	httpServer := httptest.NewServer(srv.Handler())
+	defer httpServer.Close()
+	request := baseRequest(goipp.OpGetPrinterAttributes, 0)
+	request.Operation.Add(goipp.MakeAttr("printer-uri", goipp.TagURI, goipp.String("ipp://localhost/ipp/print")))
+	encoded, err := request.EncodeBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := postIPP(t, httpServer.URL+"/ipp/print", encoded)
+	if goipp.Status(response.Code) != goipp.StatusErrorBadRequest {
+		t.Fatalf("status = %s", goipp.Status(response.Code))
+	}
+}
+func TestAirPrintAttributesCanBeEnabled(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if _, err := st.UpdateSettings(ctx, store.SettingsUpdate{
+		IPPName: "PUQU", IPPListen: ":8631", AdminListen: "127.0.0.1:8080", Advertise: true, AirPrint: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv := New(st, &fakePrinter{}, nil)
+	httpServer := httptest.NewServer(srv.Handler())
+	defer httpServer.Close()
+	request := baseRequest(goipp.OpGetPrinterAttributes, 11)
+	request.Operation.Add(goipp.MakeAttr("printer-uri", goipp.TagURI, goipp.String("ipp://localhost/ipp/print")))
+	encoded, err := request.EncodeBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := postIPP(t, httpServer.URL+"/ipp/print", encoded)
+	if !containsString(response.Printer, "document-format-supported", raster.FormatApple) ||
+		!containsString(response.Printer, "urf-supported", "RS203") {
+		t.Fatal("AirPrint attributes are not advertised")
+	}
+}
+
+func TestRequestedPrinterAttributesAreFiltered(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	srv := New(st, &fakePrinter{}, nil)
+	httpServer := httptest.NewServer(srv.Handler())
+	defer httpServer.Close()
+	request := baseRequest(goipp.OpGetPrinterAttributes, 12)
+	request.Operation.Add(goipp.MakeAttr("printer-uri", goipp.TagURI, goipp.String("ipp://localhost/ipp/print")))
+	request.Operation.Add(goipp.MakeAttr("requested-attributes", goipp.TagKeyword, goipp.String("none")))
+	encoded, err := request.EncodeBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := postIPP(t, httpServer.URL+"/ipp/print", encoded)
+	if len(response.Printer) != 0 {
+		t.Fatalf("printer attributes = %v", response.Printer)
 	}
 }
 
@@ -175,4 +249,17 @@ func stringFrom(attrs goipp.Attributes, name string) string {
 		}
 	}
 	return ""
+}
+func containsString(attrs goipp.Attributes, name, want string) bool {
+	for _, attr := range attrs {
+		if attr.Name != name {
+			continue
+		}
+		for _, value := range attr.Values {
+			if text, ok := value.V.(goipp.String); ok && string(text) == want {
+				return true
+			}
+		}
+	}
+	return false
 }

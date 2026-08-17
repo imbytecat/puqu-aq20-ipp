@@ -94,3 +94,17 @@ func TestStoreKeepsSingleActiveProfile(t *testing.T) {
 		t.Fatalf("active profiles = %d", active)
 	}
 }
+func TestSettingsRejectRemoteAdminListener(t *testing.T) {
+	ctx := context.Background()
+	s, err := Open(ctx, filepath.Join(t.TempDir(), "puqu.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, err = s.UpdateSettings(ctx, SettingsUpdate{
+		IPPName: "PUQU", IPPListen: ":8631", AdminListen: "0.0.0.0:8080", Advertise: true,
+	})
+	if err == nil {
+		t.Fatal("remote admin listener should be rejected")
+	}
+}

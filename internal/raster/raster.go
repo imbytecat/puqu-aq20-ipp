@@ -7,15 +7,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"image/jpeg"
 	"io"
 
 	"github.com/imbytecat/puqu-aq20-ipp/internal/printer"
 )
 
 const (
-	FormatPWG   = "image/pwg-raster"
-	FormatApple = "image/urf"
-
+	FormatPWG      = "image/pwg-raster"
+	FormatApple    = "image/urf"
+	FormatJPEG     = "image/jpeg"
 	pageHeaderSize = 1796
 	maxRasterBytes = 16 << 20
 
@@ -50,6 +51,9 @@ type page struct {
 }
 
 func Decode(input io.Reader, format string, profile Profile) ([]printer.Job, error) {
+	if format == FormatJPEG {
+		return decodeJPEG(input, profile)
+	}
 	reader := bufio.NewReader(io.LimitReader(input, maxRasterBytes+1))
 	sync := make([]byte, 4)
 	if _, err := io.ReadFull(reader, sync); err != nil {
@@ -139,6 +143,42 @@ func decodeApple(reader *bufio.Reader, profile Profile) ([]printer.Job, error) {
 		jobs = append(jobs, job)
 	}
 	return jobs, nil
+}
+func decodeJPEG(input io.Reader, profile Profile) ([]printer.Job, error) {
+	data, err := io.ReadAll(io.LimitReader(input, maxRasterBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read JPEG: %w", err)
+	}
+	if len(data) == 0 || len(data) > maxRasterBytes {
+		return nil, errors.New("JPEG is empty or too large")
+	}
+	config, err := jpeg.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid JPEG: %v", ErrFormat, err)
+	}
+	expectedWidth, expectedHeight := dots(profile.WidthUM), dots(profile.HeightUM)
+	if config.Width != expectedWidth || config.Height != expectedHeight {
+		return nil, fmt.Errorf("%w: got %dx%d, expected %dx%d", ErrDimensions, config.Width, config.Height, expectedWidth, expectedHeight)
+	}
+	if config.Width < 1 || config.Width > 2040 || config.Height < 1 || config.Height > 65535 {
+		return nil, errors.New("JPEG dimensions exceed printer limits")
+	}
+	image, err := jpeg.Decode(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid JPEG: %v", ErrFormat, err)
+	}
+	widthBytes := (config.Width + 7) / 8
+	bitmap := make([]byte, widthBytes*config.Height)
+	for y := range config.Height {
+		for x := range config.Width {
+			red, green, blue, _ := image.At(x, y).RGBA()
+			luma := (77*int(red>>8) + 150*int(green>>8) + 29*int(blue>>8)) >> 8
+			if luma < 128 {
+				bitmap[y*widthBytes+x/8] |= 0x80 >> (x % 8)
+			}
+		}
+	}
+	return []printer.Job{{WidthBytes: widthBytes, HeightPx: config.Height, Data: bitmap, Copies: 1}}, nil
 }
 
 func appleColorSpace(value byte) (colors, colorSpace int) {

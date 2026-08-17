@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"image"
+	"image/color"
+	"image/jpeg"
 	"testing"
 )
 
@@ -37,6 +40,27 @@ func TestDecodeAppleGrayscale(t *testing.T) {
 	data = append(data, header...)
 	data = append(data, 0x00, 0xf9, 0, 255, 0, 255, 0, 255, 0, 255)
 	jobs, err := Decode(bytes.NewReader(data), FormatApple, Profile{WidthUM: 1000, HeightUM: 125})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(jobs[0].Data, []byte{0xaa}) {
+		t.Fatalf("bitmap = % x, want aa", jobs[0].Data)
+	}
+}
+func TestDecodeJPEG(t *testing.T) {
+	source := image.NewGray(image.Rect(0, 0, 8, 1))
+	for x := range 8 {
+		if x%2 == 0 {
+			source.SetGray(x, 0, color.Gray{Y: 0})
+		} else {
+			source.SetGray(x, 0, color.Gray{Y: 255})
+		}
+	}
+	var encoded bytes.Buffer
+	if err := jpeg.Encode(&encoded, source, &jpeg.Options{Quality: 100}); err != nil {
+		t.Fatal(err)
+	}
+	jobs, err := Decode(&encoded, FormatJPEG, Profile{WidthUM: 1000, HeightUM: 125})
 	if err != nil {
 		t.Fatal(err)
 	}
