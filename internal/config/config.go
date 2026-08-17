@@ -181,10 +181,10 @@ func (c Config) Validate() error {
 	if c.IPPListen == "" || c.AdminListen == "" {
 		return errors.New("listen addresses are required")
 	}
-	if err := validateListenAddress(c.IPPListen, false); err != nil {
+	if err := validateListenAddress(c.IPPListen); err != nil {
 		return fmt.Errorf("invalid IPP listen address: %w", err)
 	}
-	if err := validateListenAddress(c.AdminListen, true); err != nil {
+	if err := validateListenAddress(c.AdminListen); err != nil {
 		return fmt.Errorf("invalid admin listen address: %w", err)
 	}
 	var level slog.Level
@@ -268,24 +268,14 @@ func flagKey(name string) string {
 	}
 }
 
-func validateListenAddress(address string, loopbackOnly bool) error {
-	host, port, err := net.SplitHostPort(address)
+func validateListenAddress(address string) error {
+	_, port, err := net.SplitHostPort(address)
 	if err != nil {
 		return err
 	}
 	portNumber, err := strconv.Atoi(port)
 	if err != nil || portNumber < 1 || portNumber > 65535 {
 		return errors.New("port must be between 1 and 65535")
-	}
-	if !loopbackOnly {
-		return nil
-	}
-	if strings.EqualFold(host, "localhost") {
-		return nil
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
-		return errors.New("admin listener must use localhost or a loopback IP")
 	}
 	return nil
 }

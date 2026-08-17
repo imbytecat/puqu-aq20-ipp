@@ -30,13 +30,13 @@ log_level = "warn"
 		RequireFile: true,
 		Flags:       flags,
 		Environ: func() []string {
-			return []string{EnvAdminListen + "=localhost:9101", EnvLogLevel + "=debug"}
+			return []string{EnvAdminListen + "=0.0.0.0:9101", EnvLogLevel + "=debug"}
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.IPPListen != ":9200" || cfg.AdminListen != "localhost:9101" || cfg.LogLevel != "debug" {
+	if cfg.IPPListen != ":9200" || cfg.AdminListen != "0.0.0.0:9101" || cfg.LogLevel != "debug" {
 		t.Fatalf("config = %+v", cfg)
 	}
 	if want := filepath.Join(dir, "data", "puqu.db"); cfg.DataPath != want {
@@ -101,8 +101,13 @@ func TestConfigValidation(t *testing.T) {
 	}
 	remote := valid
 	remote.AdminListen = "0.0.0.0:8080"
-	if err := remote.Validate(); err == nil {
-		t.Fatal("remote admin listener should be rejected")
+	if err := remote.Validate(); err != nil {
+		t.Fatalf("configured admin listener should be accepted: %v", err)
+	}
+	invalid := valid
+	invalid.AdminListen = "0.0.0.0"
+	if err := invalid.Validate(); err == nil {
+		t.Fatal("admin listener without a port should be rejected")
 	}
 	badLevel := valid
 	badLevel.LogLevel = "verbose"

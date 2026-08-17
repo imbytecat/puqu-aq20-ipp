@@ -266,7 +266,7 @@ export function RuntimePage() {
       <div className="metrics compact">
         <Metric label="配置文件" value={status.data.config.configFileLoaded ? "已加载" : "使用默认值"} detail={status.data.config.configFile} />
         <Metric label="IPP 监听" value={status.data.config.ippListen} detail="系统打印客户端连接入口" />
-        <Metric label="管理界面监听" value={status.data.config.adminListen} detail="必须绑定本机回环地址" />
+        <Metric label="管理界面监听" value={status.data.config.adminListen} detail="管理后台连接入口" />
         <Metric label="数据库" value={status.data.config.dataPath} detail="仅保存业务状态和任务历史" />
         <Metric label="日志级别" value={status.data.config.logLevel} detail="debug / info / warn / error" />
         <Metric label="配置优先级" value="CLI > 环境变量 > TOML" detail="最后回退到安全默认值" />

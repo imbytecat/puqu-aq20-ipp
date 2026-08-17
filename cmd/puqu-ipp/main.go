@@ -24,7 +24,7 @@ func main() {
 	root.PersistentFlags().String("config", "", "TOML config file (default: OS user config directory)")
 	root.PersistentFlags().String("data", "", "SQLite database path")
 	root.PersistentFlags().String("ipp-listen", config.DefaultIPPListen, "IPP listen address")
-	root.PersistentFlags().String("admin-listen", config.DefaultAdminListen, "Local admin UI listen address")
+	root.PersistentFlags().String("admin-listen", config.DefaultAdminListen, "Admin UI listen address")
 	root.PersistentFlags().String("log-level", config.DefaultLogLevel, "Log level: debug, info, warn, or error")
 	root.AddCommand(serveCmd(), discoverCmd(), printCmd(), smokeCmd(), serviceCmd(), serviceRunCmd())
 	if err := root.Execute(); err != nil {
