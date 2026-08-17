@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -49,6 +50,21 @@ func (f *fakeLink) recorded() [][]byte {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([][]byte(nil), f.writes...)
+}
+
+type blockingLink struct {
+	*fakeLink
+	entered chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
+}
+
+func (f *blockingLink) Write(data []byte) error {
+	if f.calls.Add(1) == 1 {
+		close(f.entered)
+		<-f.release
+	}
+	return f.fakeLink.Write(data)
 }
 
 func TestPrintSequence(t *testing.T) {
@@ -127,6 +143,45 @@ func TestManagerRetriesOnReplacementConnection(t *testing.T) {
 	writes := fresh.recorded()
 	if len(writes) == 0 || !bytes.Equal(writes[0], []byte{0x3a, 0x5a, 0, 0, 0, 0, 0, 0x0a}) {
 		t.Fatalf("replacement writes = % x", writes)
+	}
+}
+func TestCancelDoesNotInterleaveProtocolWrites(t *testing.T) {
+	link := &blockingLink{fakeLink: newFakeLink(), entered: make(chan struct{}), release: make(chan struct{})}
+	p := New(link, nil)
+	printDone := make(chan error, 1)
+	go func() {
+		_, err := p.Print(context.Background(), []Job{{WidthBytes: 1, HeightPx: 1, Data: []byte{0xff}}}, Settings{})
+		printDone <- err
+	}()
+	<-link.entered
+
+	cancelDone := make(chan error, 1)
+	go func() { cancelDone <- p.Cancel() }()
+	select {
+	case err := <-cancelDone:
+		close(link.release)
+		<-printDone
+		t.Fatalf("cancel write interleaved with active command: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(link.release)
+	if err := <-cancelDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-printDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLateBusyNotificationDoesNotStickAfterPrint(t *testing.T) {
+	fake := newFakeLink()
+	p := New(fake, nil)
+	if _, err := p.Print(context.Background(), []Job{{WidthBytes: 1, HeightPx: 1, Data: []byte{0xff}}}, Settings{}); err != nil {
+		t.Fatal(err)
+	}
+	fake.onData([]byte{0x3a, 0x08, 0, 0, 0, 0, 0, 0})
+	if p.Busy() {
+		t.Fatal("late busy notification left idle printer marked busy")
 	}
 }
 
