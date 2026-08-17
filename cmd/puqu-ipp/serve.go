@@ -15,13 +15,13 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/admin"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/ble"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/config"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/fleet"
-	ippserver "github.com/imbytecat/puqu-aq20-ipp/internal/ipp"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/store"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/web"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/admin"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/ble"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/config"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/fleet"
+	ippserver "github.com/imbytecat/puqu-ipp-bridge/internal/ipp"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/store"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/web"
 )
 
 func serveCmd() *cobra.Command {

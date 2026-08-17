@@ -1,4 +1,4 @@
-module github.com/imbytecat/puqu-aq20-ipp
+module github.com/imbytecat/puqu-ipp-bridge
 
 go 1.26
 

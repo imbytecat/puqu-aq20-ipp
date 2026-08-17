@@ -18,9 +18,9 @@ import (
 
 	"github.com/OpenPrinting/goipp"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/printer"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/raster"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/store"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/printer"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/raster"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/store"
 )
 
 const (
@@ -29,7 +29,7 @@ const (
 )
 
 const printerIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="24" fill="#111827"/><rect x="28" y="18" width="72" height="36" rx="6" fill="#8ca7ff"/><rect x="18" y="44" width="92" height="54" rx="12" fill="#dce3ee"/><rect x="32" y="82" width="64" height="30" rx="5" fill="#fff"/><path d="M42 92h44M42 101h31" stroke="#111827" stroke-width="5"/><circle cx="91" cy="62" r="5" fill="#42d69b"/></svg>`
-const printerPage = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>PUQU AQ20 IPP Bridge</title><style>body{font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem;color:#111827}img{width:5rem}code{background:#eef2ff;padding:.2rem .4rem;border-radius:.25rem}</style><img src="/icon.svg" alt=""><h1>PUQU AQ20 IPP Bridge</h1><p>Driverless network printer backed by Bluetooth LE.</p><p>Configure this bridge from its local administration interface.</p>`
+const printerPage = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>PUQU IPP Bridge</title><style>body{font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem;color:#111827}img{width:5rem}code{background:#eef2ff;padding:.2rem .4rem;border-radius:.25rem}</style><img src="/icon.svg" alt=""><h1>PUQU IPP Bridge</h1><p>Driverless network printer backed by Bluetooth LE.</p><p>Configure this bridge from its local administration interface.</p>`
 
 var supportedOperations = []goipp.Op{
 	goipp.OpPrintJob,

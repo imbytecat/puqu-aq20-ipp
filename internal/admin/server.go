@@ -10,11 +10,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/config"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/fleet"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/ipp"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/printer"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/store"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/config"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/fleet"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/ipp"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/printer"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/store"
 )
 
 type Server struct {

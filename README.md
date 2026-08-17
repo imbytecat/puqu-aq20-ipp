@@ -1,4 +1,4 @@
-# PUQU AQ20 IPP Bridge
+# PUQU IPP Bridge
 
 把 PUQU AQ20（以及协议兼容的 PQ/TQ/Q 系列）蓝牙标签机映射为局域网标准打印机。
 
@@ -23,7 +23,7 @@
 
 ## 启动配置
 
-Koanf 统一合并 TOML、环境变量和 CLI。默认配置文件为操作系统用户配置目录下的 `puqu-aq20-ipp/config.toml`，也可用 `--config` 或 `PUQU_CONFIG` 指定：
+Koanf 统一合并 TOML、环境变量和 CLI。默认配置文件为操作系统用户配置目录下的 `puqu-ipp/config.toml`，也可用 `--config` 或 `PUQU_CONFIG` 指定：
 
 ```toml
 data_path = ""

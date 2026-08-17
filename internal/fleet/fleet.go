@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/ble"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/printer"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/store"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/ble"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/printer"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/store"
 )
 
 type Driver struct {

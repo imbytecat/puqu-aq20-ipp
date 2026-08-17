@@ -74,7 +74,7 @@ func DefaultFile() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "puqu-aq20-ipp", "config.toml"), nil
+	return filepath.Join(dir, "puqu-ipp", "config.toml"), nil
 }
 
 // Load merges defaults, TOML, environment variables, then explicitly changed

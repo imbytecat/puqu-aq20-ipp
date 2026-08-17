@@ -26,7 +26,7 @@ SQLite 使用新 schema，不导入浏览器本地数据。每个阶段完成时
 
 ## 已确认的仓库方向
 
-- Git remote：`git@github.com:imbytecat/puqu-aq20-ipp.git`
+- Git remote：`git@github.com:imbytecat/puqu-ipp-bridge.git`
 - Moon：仓库只有空 `.moon/`，已删除
 - Proto：未发现配置或引用
 - 工具链与任务：统一使用 `mise`
@@ -401,7 +401,7 @@ depends = ["build", "test", "vet", "web:typecheck"]
 ### 阶段 0：干净切换
 
 - 将 `apps/server` 移到根 Go module
-- module path 改为 `github.com/imbytecat/puqu-aq20-ipp`
+- module path 改为 `github.com/imbytecat/puqu-ipp-bridge`
 - 命令和二进制改名 `puqu-ipp`
 - 将 `apps/web` 移到 `web`
 - 删除编辑器相关前端代码和依赖

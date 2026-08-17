@@ -14,9 +14,9 @@ import (
 
 	"github.com/OpenPrinting/goipp"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/printer"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/raster"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/store"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/printer"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/raster"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/store"
 )
 
 type fakePrinter struct {

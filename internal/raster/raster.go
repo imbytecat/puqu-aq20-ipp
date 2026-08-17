@@ -10,7 +10,7 @@ import (
 	"image/jpeg"
 	"io"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/printer"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/printer"
 )
 
 const (

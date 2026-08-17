@@ -8,8 +8,8 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/printer"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/store"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/printer"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/store"
 )
 
 type PrinterFleet interface {

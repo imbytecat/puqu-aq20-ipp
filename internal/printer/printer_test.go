@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/ble"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/ble"
 )
 
 type fakeLink struct {

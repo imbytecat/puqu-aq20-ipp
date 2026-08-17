@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/ble"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/puqu"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/ble"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/puqu"
 )
 
 func printCmd() *cobra.Command {

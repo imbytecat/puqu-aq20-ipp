@@ -15,7 +15,7 @@ import (
 	_ "github.com/ncruces/go-sqlite3/driver"
 	"github.com/pressly/goose/v3"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/store/sqlitedb"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/store/sqlitedb"
 )
 
 //go:embed migrations/*.sql
@@ -36,7 +36,7 @@ func DefaultPath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "puqu-aq20-ipp", "puqu.db"), nil
+	return filepath.Join(dir, "puqu-ipp", "puqu.db"), nil
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {

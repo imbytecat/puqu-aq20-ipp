@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/config"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/config"
 	"github.com/kardianos/service"
 	"github.com/spf13/cobra"
 )
@@ -97,7 +97,7 @@ func newService(runtimeConfig config.Config) (service.Service, error) {
 		arguments = append(arguments, "--config", runtimeConfig.ConfigFile)
 	}
 	return service.New(&serviceProgram{config: runtimeConfig}, &service.Config{
-		Name: "puqu-aq20-ipp", DisplayName: "PUQU AQ20 IPP Bridge",
+		Name: "puqu-ipp", DisplayName: "PUQU IPP Bridge",
 		Description: "Exposes PUQU AQ20 Bluetooth label printers through direct IPP queues.",
 		Arguments:   arguments,
 	})

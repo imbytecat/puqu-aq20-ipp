@@ -8,8 +8,8 @@ import (
 
 	"github.com/OpenPrinting/goipp"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/raster"
-	"github.com/imbytecat/puqu-aq20-ipp/internal/store"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/raster"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/store"
 )
 
 func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Message, host string) *goipp.Message {
@@ -72,7 +72,7 @@ func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Messag
 	attrs.Add(goipp.MakeAttr("printer-name", goipp.TagName, goipp.String(target.Name)))
 	attrs.Add(goipp.MakeAttr("printer-info", goipp.TagText, goipp.String("PUQU AQ20 Bluetooth label printer")))
 	attrs.Add(goipp.MakeAttr("printer-location", goipp.TagText, goipp.String("Local Bluetooth bridge")))
-	attrs.Add(goipp.MakeAttr("printer-make-and-model", goipp.TagText, goipp.String("PUQU AQ20 IPP Bridge")))
+	attrs.Add(goipp.MakeAttr("printer-make-and-model", goipp.TagText, goipp.String("PUQU IPP Bridge")))
 	attrs.Add(goipp.MakeAttr("printer-more-info", goipp.TagURI, goipp.String(httpURI(host, "/"))))
 	attrs.Add(goipp.MakeAttr("printer-uuid", goipp.TagURI, goipp.String("urn:uuid:"+target.Uuid)))
 	attrs.Add(goipp.MakeAttr("printer-device-id", goipp.TagText, goipp.String("MFG:PUQU;MDL:AQ20;CMD:PWGRaster,JPEG;")))
@@ -163,7 +163,7 @@ func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Messag
 	attrs.Add(goipp.MakeAttr("printer-geo-location", goipp.TagUnknown, goipp.Void{}))
 	attrs.Add(goipp.MakeAttr("printer-get-attributes-supported", goipp.TagKeyword, goipp.String("document-format")))
 	attrs.Add(goipp.MakeAttr("printer-icons", goipp.TagURI, goipp.String(httpURI(host, "/icon.svg"))))
-	attrs.Add(goipp.MakeAttr("printer-organization", goipp.TagText, goipp.String("PUQU AQ20 IPP Bridge")))
+	attrs.Add(goipp.MakeAttr("printer-organization", goipp.TagText, goipp.String("PUQU IPP Bridge")))
 	attrs.Add(goipp.MakeAttr("printer-organizational-unit", goipp.TagText, goipp.String("Local printers")))
 	attrs.Add(goipp.MakeAttr("printer-supply", goipp.TagString, goipp.Binary("index=1;class=supplyThatIsFilled;type=unknown;unit=percent;maxcapacity=100;level=-2;")))
 	attrs.Add(goipp.MakeAttr("printer-supply-description", goipp.TagText, goipp.String("Thermal label media")))

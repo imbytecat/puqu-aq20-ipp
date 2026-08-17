@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/config"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/config"
 )
 
 var version = "dev"

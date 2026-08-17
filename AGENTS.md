@@ -26,7 +26,7 @@ Dependencies point inward: delivery modules call `fleet`, `store`, `printer`, an
 - Each printer has an isolated ordered queue; different printers may print concurrently.
 - Jobs belong to exactly one printer and never move between queues.
 - IPP accepts PWG Raster and JPEG only. Clients connect directly to `ipp://HOST:PORT/ipp/<slug>`; CUPS may sit above the bridge when discovery or format conversion is needed.
-- Bootstrap config precedence is CLI > environment > TOML > defaults. Default file: OS user config directory `puqu-aq20-ipp/config.toml`; admin listen stays loopback-only.
+- Bootstrap config precedence is CLI > environment > TOML > defaults. Default file: OS user config directory `puqu-ipp/config.toml`; admin listen stays loopback-only.
 - SQLite stores mutable business state and job history, never process bootstrap settings.
 - Documents are bounded at 16 MiB; each printer queue capacity is 32.
 - Restart aborts uncertain pending/processing jobs; never replay unknown hardware state.

@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/imbytecat/puqu-aq20-ipp/internal/ble"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/ble"
 )
 
 func discoverCmd() *cobra.Command {
