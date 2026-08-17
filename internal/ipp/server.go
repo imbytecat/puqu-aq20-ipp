@@ -4,6 +4,7 @@ package ipp
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ const (
 )
 
 const printerIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><rect width="128" height="128" rx="24" fill="#111827"/><rect x="28" y="18" width="72" height="36" rx="6" fill="#8ca7ff"/><rect x="18" y="44" width="92" height="54" rx="12" fill="#dce3ee"/><rect x="32" y="82" width="64" height="30" rx="5" fill="#fff"/><path d="M42 92h44M42 101h31" stroke="#111827" stroke-width="5"/><circle cx="91" cy="62" r="5" fill="#42d69b"/></svg>`
+const printerPage = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>PUQU AQ20 IPP Bridge</title><style>body{font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem;color:#111827}img{width:5rem}code{background:#eef2ff;padding:.2rem .4rem;border-radius:.25rem}</style><img src="/icon.svg" alt=""><h1>PUQU AQ20 IPP Bridge</h1><p>Driverless network printer backed by Bluetooth LE.</p><p>Configure this bridge from its local administration interface.</p>`
 
 var supportedOperations = []goipp.Op{
 	goipp.OpPrintJob,
@@ -99,6 +101,10 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Content-Type", "image/svg+xml")
 		w.Header().Set("Cache-Control", "public, max-age=86400")
 		_, _ = io.WriteString(w, printerIcon)
+	})
+	mux.HandleFunc("GET /", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = io.WriteString(w, printerPage)
 	})
 	return mux
 }
@@ -262,7 +268,7 @@ func (s *Server) printJob(ctx context.Context, request *goipp.Message, document 
 		_ = s.store.AbortJob(ctx, job.ID, err)
 		return response(request, goipp.StatusErrorTooManyJobs, err.Error())
 	}
-	return s.jobResponse(request, job, host)
+	return s.jobResponse(request, job, host, mediaName(profile))
 }
 
 func (s *Server) createJob(ctx context.Context, request *goipp.Message, host string) *goipp.Message {
@@ -280,7 +286,7 @@ func (s *Server) createJob(ctx context.Context, request *goipp.Message, host str
 	s.mu.Lock()
 	s.openJobs[job.ID] = &queuedJob{id: job.ID, format: format, copies: copies, profile: profileToRaster(profile), settings: profileToSettings(profile)}
 	s.mu.Unlock()
-	return s.jobResponse(request, job, host)
+	return s.jobResponse(request, job, host, mediaName(profile))
 }
 
 func (s *Server) sendDocument(ctx context.Context, request *goipp.Message, document io.Reader, host string) *goipp.Message {
@@ -328,7 +334,7 @@ func (s *Server) sendDocument(ctx context.Context, request *goipp.Message, docum
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
-	return s.jobResponse(request, job, host)
+	return s.jobResponse(request, job, host, mediaNameRaster(queued.profile))
 }
 
 func (s *Server) closeJob(ctx context.Context, request *goipp.Message, host string) *goipp.Message {
@@ -353,7 +359,7 @@ func (s *Server) closeJob(ctx context.Context, request *goipp.Message, host stri
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
-	return s.jobResponse(request, job, host)
+	return s.jobResponse(request, job, host, mediaNameRaster(queued.profile))
 }
 
 func (s *Server) jobTemplate(ctx context.Context, request *goipp.Message) (string, int, *store.Profile, goipp.Status, string) {
@@ -482,13 +488,21 @@ func (s *Server) getJobAttributes(ctx context.Context, request *goipp.Message, h
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
+	profile, err := s.store.ActiveProfile(ctx)
+	if err != nil {
+		return response(request, goipp.StatusErrorInternal, err.Error())
+	}
 	reply := response(request, goipp.StatusOk, "")
-	reply.Job = filterJobAttributes(request, jobAttributes(job, printerURI(host), s.started), false)
+	reply.Job = filterJobAttributes(request, jobAttributes(job, printerURI(host), mediaName(profile), s.started), false)
 	return reply
 }
 
 func (s *Server) getJobs(ctx context.Context, request *goipp.Message, host string) *goipp.Message {
 	jobs, err := s.store.Jobs(ctx, 500)
+	if err != nil {
+		return response(request, goipp.StatusErrorInternal, err.Error())
+	}
+	profile, err := s.store.ActiveProfile(ctx)
 	if err != nil {
 		return response(request, goipp.StatusErrorInternal, err.Error())
 	}
@@ -507,7 +521,7 @@ func (s *Server) getJobs(ctx context.Context, request *goipp.Message, host strin
 		if !jobMatches(which, job.State) || myJobs && job.UserName != user {
 			continue
 		}
-		attrs := filterJobAttributes(request, jobAttributes(job, printerURI(host), s.started), true)
+		attrs := filterJobAttributes(request, jobAttributes(job, printerURI(host), mediaName(profile), s.started), true)
 		reply.Groups.Add(goipp.Group{Tag: goipp.TagJobGroup, Attrs: attrs})
 		count++
 	}
@@ -544,17 +558,22 @@ func (s *Server) cancelMyJobs(ctx context.Context, request *goipp.Message) *goip
 	return response(request, goipp.StatusOk, "")
 }
 
-func (s *Server) jobResponse(request *goipp.Message, job *store.Job, host string) *goipp.Message {
+func (s *Server) jobResponse(request *goipp.Message, job *store.Job, host, media string) *goipp.Message {
 	reply := response(request, goipp.StatusOk, "")
-	reply.Job = jobAttributes(job, printerURI(host), s.started)
+	reply.Job = jobAttributes(job, printerURI(host), media, s.started)
 	return reply
 }
 
-func jobAttributes(job *store.Job, uri string, started time.Time) goipp.Attributes {
+func jobAttributes(job *store.Job, uri, media string, started time.Time) goipp.Attributes {
 	state, reason := ippJobState(job.State)
+	completed := int64(0)
+	if job.State == "completed" {
+		completed = job.Copies
+	}
 	attrs := goipp.Attributes{}
 	attrs.Add(goipp.MakeAttr("job-id", goipp.TagInteger, goipp.Integer(job.ID)))
 	attrs.Add(goipp.MakeAttr("job-uri", goipp.TagURI, goipp.String(uri+"/jobs/"+strconv.FormatInt(job.ID, 10))))
+	attrs.Add(goipp.MakeAttr("job-uuid", goipp.TagURI, goipp.String(jobUUID(uri, job.ID))))
 	attrs.Add(goipp.MakeAttr("job-printer-uri", goipp.TagURI, goipp.String(uri)))
 	attrs.Add(goipp.MakeAttr("job-name", goipp.TagName, goipp.String(job.Name)))
 	attrs.Add(goipp.MakeAttr("job-originating-user-name", goipp.TagName, goipp.String(job.UserName)))
@@ -562,16 +581,33 @@ func jobAttributes(job *store.Job, uri string, started time.Time) goipp.Attribut
 	attrs.Add(goipp.MakeAttr("job-state-reasons", goipp.TagKeyword, goipp.String(reason)))
 	attrs.Add(goipp.MakeAttr("job-state-message", goipp.TagText, goipp.String(nullString(job.Error))))
 	attrs.Add(goipp.MakeAttr("job-k-octets", goipp.TagInteger, goipp.Integer((job.Bytes+1023)/1024)))
+	attrs.Add(goipp.MakeAttr("job-impressions", goipp.TagInteger, goipp.Integer(job.Copies)))
+	attrs.Add(goipp.MakeAttr("job-impressions-completed", goipp.TagInteger, goipp.Integer(completed)))
 	attrs.Add(goipp.MakeAttr("copies", goipp.TagInteger, goipp.Integer(job.Copies)))
 	attrs.Add(goipp.MakeAttr("document-format", goipp.TagMimeType, goipp.String(job.DocumentFormat)))
+	attrs.Add(goipp.MakeAttr("media", goipp.TagKeyword, goipp.String(media)))
+	attrs.Add(goipp.MakeAttr("output-bin", goipp.TagKeyword, goipp.String("face-down")))
+	attrs.Add(goipp.MakeAttr("print-color-mode", goipp.TagKeyword, goipp.String("monochrome")))
+	attrs.Add(goipp.MakeAttr("print-quality", goipp.TagEnum, goipp.Integer(4)))
+	attrs.Add(goipp.MakeAttr("printer-resolution", goipp.TagResolution, goipp.Resolution{Xres: 203, Yres: 203, Units: goipp.UnitsDpi}))
+	attrs.Add(goipp.MakeAttr("sides", goipp.TagKeyword, goipp.String("one-sided")))
 	attrs.Add(goipp.MakeAttr("number-of-intervening-jobs", goipp.TagInteger, goipp.Integer(0)))
 	attrs.Add(goipp.MakeAttr("job-printer-up-time", goipp.TagInteger, goipp.Integer(time.Since(started)/time.Second)))
 	attrs.Add(goipp.MakeAttr("time-at-creation", goipp.TagInteger, goipp.Integer(jobTime(started, job.CreatedAt))))
+	attrs.Add(goipp.MakeAttr("date-time-at-creation", goipp.TagDateTime, goipp.Time{Time: time.UnixMilli(job.CreatedAt)}))
 	if job.StartedAt.Valid {
 		attrs.Add(goipp.MakeAttr("time-at-processing", goipp.TagInteger, goipp.Integer(jobTime(started, job.StartedAt.Int64))))
+		attrs.Add(goipp.MakeAttr("date-time-at-processing", goipp.TagDateTime, goipp.Time{Time: time.UnixMilli(job.StartedAt.Int64)}))
+	} else {
+		attrs.Add(goipp.MakeAttr("time-at-processing", goipp.TagNoValue, goipp.Void{}))
+		attrs.Add(goipp.MakeAttr("date-time-at-processing", goipp.TagNoValue, goipp.Void{}))
 	}
 	if job.CompletedAt.Valid {
 		attrs.Add(goipp.MakeAttr("time-at-completed", goipp.TagInteger, goipp.Integer(jobTime(started, job.CompletedAt.Int64))))
+		attrs.Add(goipp.MakeAttr("date-time-at-completed", goipp.TagDateTime, goipp.Time{Time: time.UnixMilli(job.CompletedAt.Int64)}))
+	} else {
+		attrs.Add(goipp.MakeAttr("time-at-completed", goipp.TagNoValue, goipp.Void{}))
+		attrs.Add(goipp.MakeAttr("date-time-at-completed", goipp.TagNoValue, goipp.Void{}))
 	}
 	return attrs
 }
@@ -765,4 +801,15 @@ func nullString(value sql.NullString) string {
 
 func mediaName(profile *store.Profile) string {
 	return fmt.Sprintf("custom_label_%gx%gmm", float64(profile.WidthUm)/1000, float64(profile.HeightUm)/1000)
+}
+func mediaNameRaster(profile raster.Profile) string {
+	return fmt.Sprintf("custom_label_%gx%gmm", float64(profile.WidthUM)/1000, float64(profile.HeightUM)/1000)
+}
+
+func jobUUID(uri string, id int64) string {
+	value := sha256.Sum256([]byte(uri + "/jobs/" + strconv.FormatInt(id, 10)))
+	value[6] = value[6]&0x0f | 0x50
+	value[8] = value[8]&0x3f | 0x80
+	return fmt.Sprintf("urn:uuid:%08x-%04x-%04x-%04x-%012x",
+		value[0:4], value[4:6], value[6:8], value[8:10], value[10:16])
 }

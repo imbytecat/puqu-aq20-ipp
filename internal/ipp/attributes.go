@@ -3,7 +3,6 @@ package ipp
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strings"
 	"time"
 
@@ -79,7 +78,7 @@ func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Messag
 	attrs.Add(goipp.MakeAttr("printer-info", goipp.TagText, goipp.String("PUQU AQ20 Bluetooth label printer")))
 	attrs.Add(goipp.MakeAttr("printer-location", goipp.TagText, goipp.String("Local Bluetooth bridge")))
 	attrs.Add(goipp.MakeAttr("printer-make-and-model", goipp.TagText, goipp.String("PUQU AQ20 IPP Bridge")))
-	attrs.Add(goipp.MakeAttr("printer-more-info", goipp.TagURI, goipp.String(adminURL(settings.AdminListen))))
+	attrs.Add(goipp.MakeAttr("printer-more-info", goipp.TagURI, goipp.String(httpURI(host, "/"))))
 	attrs.Add(goipp.MakeAttr("printer-uuid", goipp.TagURI, goipp.String("urn:uuid:"+settings.PrinterUuid)))
 	attrs.Add(goipp.MakeAttr("printer-device-id", goipp.TagText, goipp.String("MFG:PUQU;MDL:AQ20;CMD:"+commands+";")))
 	attrs.Add(goipp.MakeAttr("printer-state", goipp.TagEnum, goipp.Integer(printerState)))
@@ -174,7 +173,7 @@ func (s *Server) getPrinterAttributes(ctx context.Context, request *goipp.Messag
 	attrs.Add(goipp.MakeAttr("printer-organizational-unit", goipp.TagText, goipp.String("Local printers")))
 	attrs.Add(goipp.MakeAttr("printer-supply", goipp.TagString, goipp.Binary("index=1;class=supplyThatIsFilled;type=unknown;unit=percent;maxcapacity=100;level=-2;")))
 	attrs.Add(goipp.MakeAttr("printer-supply-description", goipp.TagText, goipp.String("Thermal label media")))
-	attrs.Add(goipp.MakeAttr("printer-supply-info-uri", goipp.TagURI, goipp.String(adminURL(settings.AdminListen))))
+	attrs.Add(goipp.MakeAttr("printer-supply-info-uri", goipp.TagURI, goipp.String(httpURI(host, "/"))))
 	if settings.Airprint == 1 {
 		attrs.Add(goipp.MakeAttr("urf-supported", goipp.TagKeyword,
 			goipp.String("W8"), goipp.String("SRGB24"), goipp.String("RS203"), goipp.String("DM1")))
@@ -236,17 +235,6 @@ func isJobTemplateAttribute(name string) bool {
 	default:
 		return false
 	}
-}
-
-func adminURL(listen string) string {
-	host := listen
-	if strings.HasPrefix(host, ":") {
-		host = "localhost" + host
-	}
-	if parsed, err := url.Parse("http://" + host + "/"); err == nil {
-		return parsed.String()
-	}
-	return "http://localhost:8080/"
 }
 
 func fmtProfile(profile *store.Profile) string {

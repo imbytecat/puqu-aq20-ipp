@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -66,7 +67,7 @@ func (d *discovery) Run(ctx context.Context) {
 		}
 
 		formats := raster.FormatPWG + "," + raster.FormatJPEG
-		serviceType := "_ipp._tcp"
+		serviceType := "_ipp._tcp,_print"
 		urf := ""
 		if settings.Airprint == 1 {
 			formats += "," + raster.FormatApple
@@ -76,7 +77,7 @@ func (d *discovery) Run(ctx context.Context) {
 		text := []string{
 			"txtvers=1", "qtotal=1", "rp=ipp/print", "ty=PUQU AQ20",
 			"product=(PUQU AQ20 IPP Bridge)", "pdl=" + formats, "Color=F", "Duplex=F", "Copies=T",
-			"UUID=" + settings.PrinterUuid, "note=" + fmtProfile(profile), "adminurl=" + adminURL(settings.AdminListen),
+			"UUID=" + settings.PrinterUuid, "note=" + fmtProfile(profile), "adminurl=" + advertisedHTTPURL(settings.IppListen),
 		}
 		if urf != "" {
 			text = append(text, "URF="+urf)
@@ -130,6 +131,18 @@ func listenPort(address string) (int, error) {
 		return 0, err
 	}
 	return strconv.Atoi(port)
+}
+func advertisedHTTPURL(listen string) string {
+	host, _ := os.Hostname()
+	host = strings.TrimSuffix(host, ".")
+	if !strings.HasSuffix(strings.ToLower(host), ".local") {
+		host += ".local"
+	}
+	port, err := listenPort(listen)
+	if err != nil {
+		port = 8631
+	}
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(port)) + "/"
 }
 
 func interfaceSignature() string {
