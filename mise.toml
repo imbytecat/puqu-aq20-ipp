@@ -2,6 +2,7 @@
 go = "1.26"
 node = "24"
 pnpm = "10"
+sqlc = "1.31.0"
 
 [tasks.setup]
 description = "Install frontend dependencies"
@@ -54,7 +55,7 @@ run = "gofmt -w cmd internal"
 
 [tasks.sqlc]
 description = "Regenerate SQLite query bindings"
-run = "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.0 generate"
+run = "sqlc generate"
 
 [tasks.discover]
 description = "Discover BLE printers and inspect GATT"
@@ -62,7 +63,7 @@ run = "go run ./cmd/puqu-ipp discover"
 
 [tasks.print]
 description = "Print a hardware test label"
-run = "go run ./cmd/puqu-ipp print"
+run = "go run ./cmd/puqu-ipp print-test"
 
 [tasks.smoke]
 description = "Check native Bluetooth adapter access"

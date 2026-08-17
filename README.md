@@ -109,7 +109,7 @@ sudo ./bin/puqu-ipp --data /var/lib/puqu-ipp/puqu.db service install
 ```bash
 ./bin/puqu-ipp serve       # 默认命令：IPP + DNS-SD + 本机配置页
 ./bin/puqu-ipp discover    # 扫描并显示 BLE/GATT 信息
-./bin/puqu-ipp print       # 使用已保存设备/profile 打印测试标签
+./bin/puqu-ipp print-test  # 直接连接设备并打印条纹测试标签
 ./bin/puqu-ipp smoke       # 检查本机蓝牙栈访问
 ./bin/puqu-ipp service …   # 管理后台服务
 ```
