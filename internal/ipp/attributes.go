@@ -194,9 +194,6 @@ func filterPrinterAttributes(request *goipp.Message, attrs goipp.Attributes) goi
 	}
 	filtered := make(goipp.Attributes, 0, len(attrs))
 	for _, attribute := range attrs {
-		if attribute.Name == "media-col-database" && !exact[attribute.Name] {
-			continue
-		}
 		jobTemplate := isJobTemplateAttribute(attribute.Name)
 		if all || exact[attribute.Name] || description && !jobTemplate || template && jobTemplate {
 			filtered = append(filtered, attribute)

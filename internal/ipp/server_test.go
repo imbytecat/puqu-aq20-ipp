@@ -197,6 +197,7 @@ func TestGetPrinterAttributes(t *testing.T) {
 	defer httpServer.Close()
 	request := baseRequest(goipp.OpGetPrinterAttributes, 9)
 	request.Operation.Add(goipp.MakeAttr("printer-uri", goipp.TagURI, goipp.String("ipp://localhost/ipp/print")))
+	request.Operation.Add(goipp.MakeAttr("requested-attributes", goipp.TagKeyword, goipp.String("all")))
 	encoded, err := request.EncodeBytes()
 	if err != nil {
 		t.Fatal(err)
@@ -216,6 +217,20 @@ func TestGetPrinterAttributes(t *testing.T) {
 	}
 	if value, ok := integerFrom(response.Printer, "printer-state"); !ok || value != 3 {
 		t.Fatalf("printer-state = %d, ok=%v", value, ok)
+	}
+	mediaCol, ok := collectionFrom(response.Printer, "media-col-database")
+	if !ok {
+		t.Fatal("media-col-database is missing from requested-attributes=all")
+	}
+	mediaSize, ok := collectionFrom(goipp.Attributes(mediaCol), "media-size")
+	if !ok {
+		t.Fatal("media-col-database is missing media-size")
+	}
+	if width, ok := integerFrom(goipp.Attributes(mediaSize), "x-dimension"); !ok || width != 4000 {
+		t.Fatalf("media width = %d, ok=%v", width, ok)
+	}
+	if height, ok := integerFrom(goipp.Attributes(mediaSize), "y-dimension"); !ok || height != 3000 {
+		t.Fatalf("media height = %d, ok=%v", height, ok)
 	}
 }
 
@@ -340,6 +355,15 @@ func integerFrom(attrs goipp.Attributes, name string) (int, bool) {
 		}
 	}
 	return 0, false
+}
+func collectionFrom(attrs goipp.Attributes, name string) (goipp.Collection, bool) {
+	for _, attr := range attrs {
+		if attr.Name == name && len(attr.Values) > 0 {
+			value, ok := attr.Values[0].V.(goipp.Collection)
+			return value, ok
+		}
+	}
+	return nil, false
 }
 
 func stringFrom(attrs goipp.Attributes, name string) string {
