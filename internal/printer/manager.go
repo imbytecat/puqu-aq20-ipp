@@ -5,26 +5,22 @@ import (
 	"errors"
 	"sync"
 	"time"
-
-	"github.com/imbytecat/puqu-ipp-bridge/internal/ble"
 )
 
 var (
-	ErrNotConnected  = errors.New("printer is not connected")
-	ErrLinkDown      = errors.New("printer link is down")
-	ErrRetryableLink = errors.New("printer link failed before print data was sent")
+	ErrNotConnected = errors.New("printer is not connected")
+	ErrLinkDown     = errors.New("printer link is down")
 )
 
 type Status struct {
-	Connected  bool          `json:"connected"`
-	Connecting bool          `json:"connecting"`
-	Busy       bool          `json:"busy"`
-	LastError  string        `json:"lastError,omitempty"`
-	Info       *ble.Info     `json:"info,omitempty"`
-	Gatt       []ble.Service `json:"gatt,omitempty"`
+	Connected  bool      `json:"connected"`
+	Connecting bool      `json:"connecting"`
+	Busy       bool      `json:"busy"`
+	LastError  string    `json:"lastError,omitempty"`
+	Info       *LinkInfo `json:"info,omitempty"`
 }
 
-type OptionsLoader func(context.Context) (ble.ConnectOptions, error)
+type Connector func(context.Context) (Link, error)
 
 type Manager struct {
 	mu         sync.Mutex
@@ -33,14 +29,13 @@ type Manager struct {
 	connecting bool
 	lastError  string
 	reconnect  chan struct{}
-	changed    chan struct{}
 }
 
 func NewManager() *Manager {
-	return &Manager{reconnect: make(chan struct{}, 1), changed: make(chan struct{})}
+	return &Manager{reconnect: make(chan struct{}, 1)}
 }
 
-func (m *Manager) StartAutoConnect(ctx context.Context, load OptionsLoader) {
+func (m *Manager) StartAutoConnect(ctx context.Context, connect Connector) {
 	go func() {
 		m.requestReconnect()
 		for {
@@ -54,10 +49,7 @@ func (m *Manager) StartAutoConnect(ctx context.Context, load OptionsLoader) {
 			if m.Status().Connected {
 				continue
 			}
-			opts, err := load(ctx)
-			if err == nil {
-				_, _, err = m.Connect(ctx, opts)
-			}
+			_, err := m.Connect(ctx, connect)
 			if err != nil {
 				m.setError(err)
 				timer := time.NewTimer(5 * time.Second)
@@ -74,18 +66,11 @@ func (m *Manager) StartAutoConnect(ctx context.Context, load OptionsLoader) {
 	}()
 }
 
-func (m *Manager) Scan(ctx context.Context, window time.Duration) ([]ble.Device, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return ble.Scan(window)
-}
-
-func (m *Manager) Connect(ctx context.Context, opts ble.ConnectOptions) (ble.Info, []ble.Service, error) {
+func (m *Manager) Connect(ctx context.Context, connect Connector) (LinkInfo, error) {
 	m.connectMu.Lock()
 	defer m.connectMu.Unlock()
 	if err := ctx.Err(); err != nil {
-		return ble.Info{}, nil, err
+		return LinkInfo{}, err
 	}
 
 	m.mu.Lock()
@@ -93,20 +78,19 @@ func (m *Manager) Connect(ctx context.Context, opts ble.ConnectOptions) (ble.Inf
 	m.current = nil
 	m.connecting = true
 	m.lastError = ""
-	m.notifyChangedLocked()
 	m.mu.Unlock()
 	if old != nil {
 		_ = old.Disconnect()
 		if err := sleep(ctx, 300*time.Millisecond); err != nil {
 			m.finishConnect(err)
-			return ble.Info{}, nil, err
+			return LinkInfo{}, err
 		}
 	}
 
-	conn, err := ble.Connect(opts)
+	conn, err := connect(ctx)
 	if err != nil {
 		m.finishConnect(err)
-		return ble.Info{}, nil, err
+		return LinkInfo{}, err
 	}
 
 	var next *Printer
@@ -115,7 +99,6 @@ func (m *Manager) Connect(ctx context.Context, opts ble.ConnectOptions) (ble.Inf
 		if m.current == next {
 			m.current = nil
 			m.lastError = ErrLinkDown.Error()
-			m.notifyChangedLocked()
 		}
 		m.mu.Unlock()
 		m.requestReconnect()
@@ -125,9 +108,8 @@ func (m *Manager) Connect(ctx context.Context, opts ble.ConnectOptions) (ble.Inf
 	m.current = next
 	m.connecting = false
 	m.lastError = ""
-	m.notifyChangedLocked()
 	m.mu.Unlock()
-	return next.Info(), next.Gatt(), nil
+	return next.Info(), nil
 }
 
 func (m *Manager) finishConnect(err error) {
@@ -136,7 +118,6 @@ func (m *Manager) finishConnect(err error) {
 	if err != nil {
 		m.lastError = err.Error()
 	}
-	m.notifyChangedLocked()
 	m.mu.Unlock()
 }
 
@@ -146,7 +127,6 @@ func (m *Manager) setError(err error) {
 	}
 	m.mu.Lock()
 	m.lastError = err.Error()
-	m.notifyChangedLocked()
 	m.mu.Unlock()
 }
 
@@ -161,34 +141,12 @@ func (m *Manager) requestReconnect() {
 	default:
 	}
 }
-func (m *Manager) notifyChangedLocked() {
-	close(m.changed)
-	m.changed = make(chan struct{})
-}
-
-func (m *Manager) waitForReplacement(ctx context.Context, previous *Printer) (*Printer, error) {
-	for {
-		m.mu.Lock()
-		current := m.current
-		changed := m.changed
-		m.mu.Unlock()
-		if current != nil && current != previous && current.Connected() {
-			return current, nil
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-changed:
-		}
-	}
-}
 
 func (m *Manager) Disconnect() {
 	m.mu.Lock()
 	p := m.current
 	m.current = nil
 	m.connecting = false
-	m.notifyChangedLocked()
 	m.mu.Unlock()
 	if p != nil {
 		_ = p.Disconnect()
@@ -208,15 +166,6 @@ func (m *Manager) Print(ctx context.Context, jobs []Job, settings Settings) (Res
 		return Result{}, ErrLinkDown
 	}
 	result, err := p.Print(ctx, jobs, settings)
-	if errors.Is(err, ErrRetryableLink) {
-		m.requestReconnect()
-		replacement, waitErr := m.waitForReplacement(ctx, p)
-		if waitErr != nil {
-			m.setError(waitErr)
-			return result, waitErr
-		}
-		result, err = replacement.Print(ctx, jobs, settings)
-	}
 	if err != nil {
 		m.setError(err)
 	}
@@ -245,6 +194,5 @@ func (m *Manager) Status() Status {
 	status.Connected = true
 	status.Busy = p.Busy()
 	status.Info = &info
-	status.Gatt = p.Gatt()
 	return status
 }

@@ -50,7 +50,7 @@ export function RootLayout() {
       </aside>
       <main className="content">
         <header className="topbar">
-          <div><p className="eyebrow">DRIVERLESS IPP · BLUETOOTH LE</p><h1>标签打印管理</h1></div>
+          <div><p className="eyebrow">DRIVERLESS IPP · DIRECT USB</p><h1>标签打印管理</h1></div>
           <div className={`service-pill ${status.isError ? "offline" : "online"}`}><span />{status.isError ? "服务异常" : "服务运行中"}</div>
         </header>
         {status.error && <Feedback error={status.error} />}
@@ -75,7 +75,7 @@ export function DashboardPage() {
       <div className="metrics">
         <Metric label="已配置打印机" value={String(status.data.printers.length)} detail={`${connected} 台已连接`} />
         <Metric label="进行中任务" value={String(activeJobs)} detail={`${completed} 个近期完成`} />
-        <Metric label="已保存设备" value={String(status.data.devices.length)} detail="BLE 物理端点" />
+        <Metric label="已保存设备" value={String(status.data.devices.length)} detail="USB 物理端点" />
         <Metric label="标签规格" value={String(status.data.profiles.length)} detail="可被多台打印机复用" />
       </div>
       <Panel title="打印机状态" description="每台打印机拥有独立连接、队列和 IPP 地址。">
@@ -114,7 +114,7 @@ export function PrintersPage() {
       <div className="card-grid">
         {status.data.printers.map((item) => <PrinterCard key={item.id} printer={item} status={status.data} />)}
       </div>
-      <Panel title="添加打印机" description="当前支持 PUQU AQ20 / PQ / TQ / Q 系列 BLE 驱动。">
+      <Panel title="添加打印机" description="当前支持 PUQU AQ20 / PQ / TQ / Q 系列 USB 驱动。">
         <PrinterForm initial={initial} status={status.data} saving={create.isPending} onSave={save} />
         <Feedback error={create.error} />
       </Panel>
@@ -183,23 +183,23 @@ export function PrinterPage() {
 
 export function DevicesPage() {
   const status = useStatus();
-  const scan = useMutation({ mutationFn: api.scan });
+  const scan = useMutation({ mutationFn: api.scanUSB });
   const save = useRefreshMutation(api.saveDevice);
   const remove = useRefreshMutation((id: number) => api.deleteDevice(id));
   if (!status.data) return <Loading />;
   return (
-    <Page title="设备" description="保存发现到的 BLE 设备，再在打印机设置中完成绑定。一个物理设备只能分配给一台打印机。">
-      <Panel title="扫描蓝牙" description="请先开启打印机并放在此电脑附近。扫描期间其他连接会短暂等待。">
-        <Button busy={scan.isPending} onClick={() => scan.mutate()}>扫描附近设备</Button>
-        <Feedback error={scan.error} success={scan.isSuccess ? `发现 ${scan.data.devices.length} 个设备。` : ""} />
+    <Page title="设备" description="连接固定 PUQU USB 打印机，再绑定到逻辑打印机。一个物理设备只能分配给一台打印机。">
+      <Panel title="扫描 USB" description="连接 PUQU USB 数据线后扫描。服务进程需要访问 8888:0026 设备。">
+        <Button busy={scan.isPending} onClick={() => scan.mutate()}>扫描 USB 打印机</Button>
+        <Feedback error={scan.error} success={scan.isSuccess ? `发现 ${scan.data.devices.length} 个 USB 设备。` : ""} />
         {scan.data && <div className="list inset">
           {scan.data.devices.map((device) => (
             <div className="list-row" key={`${device.id}-${device.address}`}>
-              <div><strong>{device.name || "未命名设备"}</strong><small>{device.address} · {device.rssi} dBm</small></div>
+              <div><strong>{device.name || "PUQU USB 打印机"}</strong><small>{device.address} · 序列号 {device.id}</small></div>
               <Button kind="secondary" busy={save.isPending && save.variables?.id === device.id} onClick={() => save.mutate(device)}>保存设备</Button>
             </div>
           ))}
-          {scan.data.devices.length === 0 && <Empty>未发现设备。</Empty>}
+          {scan.data.devices.length === 0 && <Empty>未发现 USB 打印机。</Empty>}
         </div>}
       </Panel>
       <Panel title="已保存设备" description="删除已分配设备会自动解除对应打印机的绑定。">
@@ -207,7 +207,7 @@ export function DevicesPage() {
           {status.data.devices.map((device) => {
             const owner = status.data.printers.find((item) => item.id === device.assignedPrinterId);
             return <div className="list-row" key={device.id}>
-              <div><strong>{device.name || device.nativeId}</strong><small>{device.address} · 写入 {device.writeUuid} · 通知 {device.notifyUuid || "自动"}</small>{owner && <span className="tag">分配给 {owner.name}</span>}</div>
+              <div><strong>{device.name || device.nativeId}</strong><small>{device.address} · 序列号 {device.nativeId}</small>{owner && <span className="tag">分配给 {owner.name}</span>}</div>
               <Button kind="ghost-danger" onClick={() => window.confirm(`删除设备“${device.name}”？`) && remove.mutate(device.id)}>删除</Button>
             </div>;
           })}

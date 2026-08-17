@@ -7,11 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"time"
 
-	"github.com/imbytecat/puqu-ipp-bridge/internal/ble"
 	"github.com/imbytecat/puqu-ipp-bridge/internal/printer"
 	"github.com/imbytecat/puqu-ipp-bridge/internal/store"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/usb"
 )
 
 type Driver struct {
@@ -21,7 +20,7 @@ type Driver struct {
 }
 
 func Drivers() []Driver {
-	return []Driver{{ID: store.DriverPUQUAQ20, Name: "PUQU AQ20 / PQ / TQ / Q", Transport: "Bluetooth LE"}}
+	return []Driver{{ID: store.DriverPUQUAQ20, Name: "PUQU AQ20 / PQ / TQ / Q", Transport: "USB"}}
 }
 
 type runtime struct {
@@ -96,28 +95,28 @@ func (f *Fleet) startLocked(id int64, enabled bool, fingerprint string) *runtime
 	ctx, cancel := context.WithCancel(f.root)
 	r.cancel = cancel
 	r.manager = printer.NewManager()
-	r.manager.StartAutoConnect(ctx, func(ctx context.Context) (ble.ConnectOptions, error) {
+	r.manager.StartAutoConnect(ctx, func(ctx context.Context) (printer.Link, error) {
 		config, err := f.store.Printer(ctx, id)
 		if err != nil {
-			return ble.ConnectOptions{}, err
+			return nil, err
 		}
 		if config.Enabled != 1 {
-			return ble.ConnectOptions{}, errors.New("printer is disabled")
+			return nil, errors.New("printer is disabled")
 		}
 		if config.Driver != store.DriverPUQUAQ20 {
-			return ble.ConnectOptions{}, fmt.Errorf("unsupported printer driver %q", config.Driver)
+			return nil, fmt.Errorf("unsupported printer driver %q", config.Driver)
 		}
 		if !config.DeviceID.Valid {
-			return ble.ConnectOptions{}, errors.New("no device assigned")
+			return nil, errors.New("no device assigned")
 		}
 		device, err := f.store.Device(ctx, config.DeviceID.Int64)
 		if err != nil {
-			return ble.ConnectOptions{}, err
+			return nil, err
 		}
-		return ble.ConnectOptions{
-			ID: device.NativeID, Address: device.Address, WriteUUID: device.WriteUuid,
-			NotifyUUID: nullableString(device.NotifyUuid),
-		}, nil
+		if device.Transport != store.TransportUSB {
+			return nil, fmt.Errorf("device %q is not a USB printer", device.Name)
+		}
+		return usb.Connect(usb.ConnectOptions{ID: device.NativeID})
 	})
 	return r
 }
@@ -134,11 +133,8 @@ func stop(r *runtime) {
 	}
 }
 
-func (f *Fleet) Scan(ctx context.Context, window time.Duration) ([]ble.Device, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return ble.Scan(window)
+func (f *Fleet) ScanUSB(ctx context.Context) ([]usb.Device, error) {
+	return usb.Scan(ctx)
 }
 
 func (f *Fleet) Reconnect(id int64) error {
@@ -206,11 +202,4 @@ func nullableID(value sql.NullInt64) int64 {
 		return value.Int64
 	}
 	return 0
-}
-
-func nullableString(value sql.NullString) string {
-	if value.Valid {
-		return value.String
-	}
-	return ""
 }

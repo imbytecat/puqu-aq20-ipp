@@ -8,7 +8,7 @@ import (
 	"database/sql"
 )
 
-type BleDevice struct {
+type Device struct {
 	ID         int64          `json:"id"`
 	NativeID   string         `json:"native_id"`
 	Name       string         `json:"name"`
@@ -17,6 +17,7 @@ type BleDevice struct {
 	NotifyUuid sql.NullString `json:"notify_uuid"`
 	LastSeenAt int64          `json:"last_seen_at"`
 	UpdatedAt  int64          `json:"updated_at"`
+	Transport  string         `json:"transport"`
 }
 
 type LabelProfile struct {
@@ -30,6 +31,11 @@ type LabelProfile struct {
 	Speed     int64  `json:"speed"`
 	CreatedAt int64  `json:"created_at"`
 	UpdatedAt int64  `json:"updated_at"`
+}
+
+type LegacyBlePrinterAssignment struct {
+	PrinterID int64 `json:"printer_id"`
+	DeviceID  int64 `json:"device_id"`
 }
 
 type PrintJob struct {

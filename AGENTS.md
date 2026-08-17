@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Cross-platform daemon exposing multiple PUQU AQ20-compatible BLE label printers as direct-addressed driverless IPP printers. One Go binary owns Bluetooth, IPP, SQLite, per-printer queues, and an embedded local React administration UI.
+Linux daemon exposing multiple PUQU AQ20-compatible USB label printers as direct-addressed driverless IPP printers. One Go binary owns usbfs, IPP, SQLite, per-printer queues, and an embedded local React administration UI.
 
 ## Architecture
 
@@ -10,14 +10,14 @@ Cross-platform daemon exposing multiple PUQU AQ20-compatible BLE label printers 
 - `internal/ipp/` — IPP gateway routing stable `/ipp/<slug>` paths to isolated queues. No mDNS/DNS-SD discovery.
 - `internal/raster/` — pure PWG Raster and JPEG decoding. Exact 203 dpi profile dimensions; no silent scaling.
 - `internal/printer/` — one physical printer connection, reconnect loop, serialized print/cancel flow.
-- `internal/ble/` — device-agnostic native BlueZ/CoreBluetooth/WinRT central. Adapter scans serialize; connections coexist.
+- `internal/usb/` — Linux usbfs discovery and direct bulk endpoint transport. Devices bind by stable USB serial number; connections coexist.
 - `internal/puqu/` — pure reverse-engineered PUQU wire protocol.
 - `internal/store/` — SQLite business state through ncruces/go-sqlite3, goose, and sqlc.
 - `internal/admin/` — local JSON management interface. No IPP protocol logic.
 - `web/` — React 19, TanStack Router/Query, Tailwind CSS v4 via `@tailwindcss/vite`.
 - `internal/web/` — build-tag-gated embedded SPA.
 
-Dependencies point inward: delivery modules call `fleet`, `store`, `printer`, and `raster`; `fleet` owns printer managers; `printer` calls `ble` and `puqu`.
+Dependencies point inward: delivery modules call `fleet`, `store`, `printer`, and `raster`; `fleet` owns printer managers and USB links; `printer` calls `puqu`.
 
 ## Invariants
 
@@ -61,4 +61,4 @@ Hardware commands: `mise run discover`, `mise run print`, `mise run smoke`.
 - IPP: targeted Go tests; CUPS `ipptool` for operation/attribute changes.
 - Config: test defaults/file/env/CLI precedence, strict unknown-key rejection, and service config-path persistence.
 - UI: typecheck/build, then exercise changed routes in a browser at desktop and mobile widths.
-- BLE/hardware: use `discover`, `print`, or `smoke`; state untested platforms and hardware explicitly.
+- USB/hardware: use `discover`, `print`, or `smoke`; state untested hardware explicitly.

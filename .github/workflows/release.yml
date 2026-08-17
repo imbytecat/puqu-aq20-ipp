@@ -9,11 +9,7 @@ permissions:
 
 jobs:
   build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -31,23 +27,14 @@ jobs:
       - run: pnpm --dir web install --frozen-lockfile
       - run: pnpm --dir web build
       - run: go test ./...
-      - name: Build Unix archive
-        if: runner.os != 'Windows'
-        shell: bash
+      - name: Build Linux archive
         run: |
           go build -tags embed -ldflags "-X main.version=${GITHUB_REF_NAME}" -o puqu-ipp ./cmd/puqu-ipp
           mkdir -p dist
-          tar -czf "dist/puqu-ipp-${RUNNER_OS}-${RUNNER_ARCH}.tar.gz" puqu-ipp
-      - name: Build Windows archive
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          go build -tags embed -ldflags "-X main.version=$env:GITHUB_REF_NAME" -o puqu-ipp.exe ./cmd/puqu-ipp
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Compress-Archive puqu-ipp.exe "dist/puqu-ipp-$env:RUNNER_OS-$env:RUNNER_ARCH.zip"
+          tar -czf "dist/puqu-ipp-Linux-${RUNNER_ARCH}.tar.gz" puqu-ipp
       - uses: actions/upload-artifact@v4
         with:
-          name: puqu-ipp-${{ runner.os }}-${{ runner.arch }}
+          name: puqu-ipp-Linux-${{ runner.arch }}
           path: dist/*
 
   release:

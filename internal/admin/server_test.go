@@ -38,7 +38,7 @@ func TestAdminRoutesPersistMultiplePrinters(t *testing.T) {
 	response = serve(handler, http.MethodPost, "/api/devices", []byte(`{
 		"nativeId":"dev-1","name":"Q20-test","address":"dev-1"
 	}`))
-	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"writeUuid":"ae01"`) {
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"nativeId":"dev-1"`) {
 		t.Fatalf("save device: %d %s", response.Code, response.Body.String())
 	}
 	var device deviceDTO

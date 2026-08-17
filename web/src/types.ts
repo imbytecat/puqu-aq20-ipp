@@ -40,8 +40,6 @@ export type Device = {
   nativeId: string;
   name: string;
   address: string;
-  writeUuid: string;
-  notifyUuid: string | null;
   assignedPrinterId: number | null;
   lastSeenAt: number;
 };
@@ -50,7 +48,6 @@ export type ScannedDevice = {
   id: string;
   name: string;
   address: string;
-  rssi: number;
 };
 
 export type Profile = {

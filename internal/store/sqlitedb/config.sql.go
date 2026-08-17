@@ -7,11 +7,10 @@ package sqlitedb
 
 import (
 	"context"
-	"database/sql"
 )
 
 const deleteDevice = `-- name: DeleteDevice :execrows
-DELETE FROM ble_devices WHERE id = ?
+DELETE FROM devices WHERE id = ? AND transport = 'usb'
 `
 
 func (q *Queries) DeleteDevice(ctx context.Context, id int64) (int64, error) {
@@ -23,12 +22,12 @@ func (q *Queries) DeleteDevice(ctx context.Context, id int64) (int64, error) {
 }
 
 const getDevice = `-- name: GetDevice :one
-SELECT id, native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at FROM ble_devices WHERE id = ?
+SELECT id, native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at, transport FROM devices WHERE id = ? AND transport = 'usb'
 `
 
-func (q *Queries) GetDevice(ctx context.Context, id int64) (*BleDevice, error) {
+func (q *Queries) GetDevice(ctx context.Context, id int64) (*Device, error) {
 	row := q.db.QueryRowContext(ctx, getDevice, id)
-	var i BleDevice
+	var i Device
 	err := row.Scan(
 		&i.ID,
 		&i.NativeID,
@@ -38,23 +37,24 @@ func (q *Queries) GetDevice(ctx context.Context, id int64) (*BleDevice, error) {
 		&i.NotifyUuid,
 		&i.LastSeenAt,
 		&i.UpdatedAt,
+		&i.Transport,
 	)
 	return &i, err
 }
 
 const listDevices = `-- name: ListDevices :many
-SELECT id, native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at FROM ble_devices ORDER BY last_seen_at DESC, name ASC
+SELECT id, native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at, transport FROM devices WHERE transport = 'usb' ORDER BY last_seen_at DESC, name ASC
 `
 
-func (q *Queries) ListDevices(ctx context.Context) ([]*BleDevice, error) {
+func (q *Queries) ListDevices(ctx context.Context) ([]*Device, error) {
 	rows, err := q.db.QueryContext(ctx, listDevices)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []*BleDevice{}
+	items := []*Device{}
 	for rows.Next() {
-		var i BleDevice
+		var i Device
 		if err := rows.Scan(
 			&i.ID,
 			&i.NativeID,
@@ -64,6 +64,7 @@ func (q *Queries) ListDevices(ctx context.Context) ([]*BleDevice, error) {
 			&i.NotifyUuid,
 			&i.LastSeenAt,
 			&i.UpdatedAt,
+			&i.Transport,
 		); err != nil {
 			return nil, err
 		}
@@ -79,40 +80,37 @@ func (q *Queries) ListDevices(ctx context.Context) ([]*BleDevice, error) {
 }
 
 const upsertDevice = `-- name: UpsertDevice :one
-INSERT INTO ble_devices (
-    native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO devices (
+    transport, native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at
+) VALUES ('usb', ?, ?, ?, '', NULL, ?, ?)
 ON CONFLICT(native_id) DO UPDATE SET
+    transport = 'usb',
     name = excluded.name,
     address = excluded.address,
-    write_uuid = excluded.write_uuid,
-    notify_uuid = excluded.notify_uuid,
+    write_uuid = '',
+    notify_uuid = NULL,
     last_seen_at = excluded.last_seen_at,
     updated_at = excluded.updated_at
-RETURNING id, native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at
+RETURNING id, native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at, transport
 `
 
 type UpsertDeviceParams struct {
-	NativeID   string         `json:"native_id"`
-	Name       string         `json:"name"`
-	Address    string         `json:"address"`
-	WriteUuid  string         `json:"write_uuid"`
-	NotifyUuid sql.NullString `json:"notify_uuid"`
-	LastSeenAt int64          `json:"last_seen_at"`
-	UpdatedAt  int64          `json:"updated_at"`
+	NativeID   string `json:"native_id"`
+	Name       string `json:"name"`
+	Address    string `json:"address"`
+	LastSeenAt int64  `json:"last_seen_at"`
+	UpdatedAt  int64  `json:"updated_at"`
 }
 
-func (q *Queries) UpsertDevice(ctx context.Context, arg UpsertDeviceParams) (*BleDevice, error) {
+func (q *Queries) UpsertDevice(ctx context.Context, arg UpsertDeviceParams) (*Device, error) {
 	row := q.db.QueryRowContext(ctx, upsertDevice,
 		arg.NativeID,
 		arg.Name,
 		arg.Address,
-		arg.WriteUuid,
-		arg.NotifyUuid,
 		arg.LastSeenAt,
 		arg.UpdatedAt,
 	)
-	var i BleDevice
+	var i Device
 	err := row.Scan(
 		&i.ID,
 		&i.NativeID,
@@ -122,6 +120,7 @@ func (q *Queries) UpsertDevice(ctx context.Context, arg UpsertDeviceParams) (*Bl
 		&i.NotifyUuid,
 		&i.LastSeenAt,
 		&i.UpdatedAt,
+		&i.Transport,
 	)
 	return &i, err
 }

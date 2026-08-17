@@ -98,7 +98,7 @@ func newService(runtimeConfig config.Config) (service.Service, error) {
 	}
 	return service.New(&serviceProgram{config: runtimeConfig}, &service.Config{
 		Name: "puqu-ipp", DisplayName: "PUQU IPP Bridge",
-		Description: "Exposes PUQU AQ20 Bluetooth label printers through direct IPP queues.",
+		Description: "Exposes PUQU AQ20 USB label printers through direct IPP queues.",
 		Arguments:   arguments,
 	})
 }

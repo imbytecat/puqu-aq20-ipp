@@ -1,53 +1,58 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
-	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/imbytecat/puqu-ipp-bridge/internal/ble"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/usb"
 )
 
 func discoverCmd() *cobra.Command {
-	var id string
-	cmd := &cobra.Command{
-		Use:   "discover [namePrefix]",
-		Short: "Connect and dump the GATT table and selected endpoints",
-		RunE: func(_ *cobra.Command, args []string) error {
-			namePrefix := "Q20"
-			if len(args) > 0 {
-				namePrefix = args[0]
-			}
-			conn, err := ble.Connect(ble.ConnectOptions{NamePrefix: namePrefix, ID: id})
+	return &cobra.Command{
+		Use:   "discover [serial]",
+		Short: "List connected PUQU USB printers",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			devices, err := usb.Scan(cmd.Context())
 			if err != nil {
 				return err
 			}
-			defer func() {
-				_ = conn.Disconnect()
-				ble.Shutdown()
-			}()
-			info := conn.Info()
-			fmt.Printf("Connected: %s address=%s\n", info.Name, info.Address)
-			for _, svc := range conn.Gatt() {
-				fmt.Printf("Service %s\n", svc.UUID)
-				for _, characteristic := range svc.Characteristics {
-					fmt.Printf("  char %s [%s]\n", characteristic.UUID, strings.Join(characteristic.Properties, ", "))
-				}
+			for _, device := range devices {
+				fmt.Printf("%s %s %s\n", device.ID, device.Address, device.Name)
 			}
-			notify := "none"
-			if info.NotifyChar != nil {
-				notify = *info.NotifyChar
+			if len(args) == 0 {
+				return nil
 			}
-			fmt.Printf("writeUuid=%s notifyUuid=%s writeWithoutResponse=%v\n", info.WriteChar, notify, info.WithoutResponse)
-			if info.NotifyChar != nil {
-				conn.OnData(func(data []byte) { fmt.Printf("notify <- %x\n", data) })
-				time.Sleep(4 * time.Second)
+			device, err := selectUSBDevice(cmd.Context(), args[0])
+			if err != nil {
+				return err
 			}
+			conn, err := usb.Connect(usb.ConnectOptions{ID: device.ID})
+			if err != nil {
+				return err
+			}
+			defer conn.Disconnect()
+			fmt.Printf("Connected: %s serial=%s address=%s\n", device.Name, device.ID, device.Address)
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&id, "id", "", "match an exact native Bluetooth id")
-	return cmd
+}
+
+func selectUSBDevice(ctx context.Context, id string) (usb.Device, error) {
+	devices, err := usb.Scan(ctx)
+	if err != nil {
+		return usb.Device{}, err
+	}
+	for _, device := range devices {
+		if id == "" || device.ID == id {
+			return device, nil
+		}
+	}
+	if id == "" {
+		return usb.Device{}, errors.New("no PUQU USB printer found")
+	}
+	return usb.Device{}, fmt.Errorf("PUQU USB printer %q not found", id)
 }

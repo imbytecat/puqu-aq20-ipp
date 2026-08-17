@@ -1,4 +1,4 @@
-// Command puqu-ipp exposes PUQU AQ20 Bluetooth printers through direct IPP queues.
+// Command puqu-ipp exposes PUQU AQ20 USB printers through direct IPP queues.
 package main
 
 import (
@@ -15,7 +15,7 @@ var version = "dev"
 func main() {
 	root := &cobra.Command{
 		Use:           "puqu-ipp",
-		Short:         "Driverless IPP bridge for PUQU AQ20 Bluetooth printers",
+		Short:         "Driverless IPP bridge for PUQU AQ20 USB printers",
 		Version:       version,
 		SilenceUsage:  true,
 		SilenceErrors: true,

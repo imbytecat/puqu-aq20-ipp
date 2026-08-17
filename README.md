@@ -1,24 +1,24 @@
 # PUQU IPP Bridge
 
-把 PUQU AQ20（以及协议兼容的 PQ/TQ/Q 系列）蓝牙标签机映射为局域网标准打印机。
+把 PUQU AQ20（以及协议兼容的 PQ/TQ/Q 系列）USB 标签机映射为局域网标准打印机。服务端仅支持 Linux。
 
-一个 Go 守护进程可管理多台物理设备，并为每台已配置打印机提供独立 IPP 队列。Windows、macOS 和 Linux 客户端通过系统打印接口提交作业，不直接接触蓝牙。
+一个 Go 守护进程可管理多台物理设备，并为每台已配置打印机提供独立 IPP 队列。客户端通过系统打印接口提交作业，不直接接触 USB。
 
 ```text
-系统打印对话框 ── IPP/PWG Raster/JPEG ──▶ puqu-ipp ── BLE ──▶ 多台 PUQU 打印机
+系统打印对话框 ── IPP/PWG Raster/JPEG ──▶ puqu-ipp ── USB ──▶ 多台 PUQU 打印机
                                              ├── 每台打印机独立队列
                                              └── 127.0.0.1:8080 管理后台
 ```
 
 ## 功能
 
-- 多打印机：每个逻辑打印机选择驱动、BLE 设备和标签规格，拥有稳定 UUID、队列路径和独立作业队列。
+- 多打印机：每个逻辑打印机选择驱动、USB 设备和标签规格，拥有稳定 UUID、队列路径和独立作业队列。
 - 通用驱动模型：当前内置 `puqu-aq20`，覆盖 AQ20/PQ/TQ/Q 协议兼容设备；可继续增加驱动实现。
 - IPP 1.1/2.0：`Print-Job`、`Validate-Job`、`Create-Job`、`Send-Document`、取消和作业查询。
 - 驱动免安装输入：PWG Raster、JPEG；每台打印机使用稳定的 `/ipp/<queue>` 地址。
 - 固定 203 dpi、单色、单面标签；打印机选择的标签规格决定精确介质尺寸及浓度、速度、纸张类型。
 - SQLite 保存打印机、物理设备、标签规格和作业历史；服务重启时中止状态不确定的在途作业。
-- 多个 BLE 连接可并存；连接扫描由系统适配器串行协调，不同打印机可并行处理作业。
+- 多个 USB 连接可并存；每台打印机按 USB 序列号稳定绑定，不同打印机可并行处理作业。
 - React 19 + TanStack Router/Query + Tailwind CSS v4 管理后台；生产构建内嵌进单个 Go 二进制。
 
 ## 启动配置
@@ -45,11 +45,7 @@ SQLite 只保存业务状态：打印机、设备、标签规格和作业记录�
 
 ## 前置条件
 
-| 平台 | BLE 后端 | 前置条件 |
-|---|---|---|
-| Linux | BlueZ / D-Bus | `bluetoothd` 正在运行，服务账号能访问系统 D-Bus |
-| macOS | CoreBluetooth | 给二进制或承载它的服务授予蓝牙权限 |
-| Windows | WinRT | 使用系统蓝牙栈；通常无需额外驱动 |
+Linux 通过 usbfs 直接访问打印机。服务账号必须能读写 USB `8888:0026`；系统服务默认可用 root，开发运行需 sudo 或 udev 规则。IPP 客户端仍可使用 Linux、macOS 或 Windows。
 
 开发工具由 [mise](https://mise.jdx.dev/) 固定：Go 1.26、Node 24、pnpm 10。
 
@@ -100,15 +96,15 @@ sudo ./bin/puqu-ipp service start
 ./bin/puqu-ipp service status
 ```
 
-配置文件必须能被服务账号读取；数据库目录必须可写；服务账号还需拥有蓝牙权限。
+配置文件必须能被服务账号读取；数据库目录必须可写；Linux 服务账号还需能读写 PUQU USB 设备。
 
 ## CLI
 
 ```bash
 ./bin/puqu-ipp serve       # 默认命令：IPP + 本机管理后台
-./bin/puqu-ipp discover    # 扫描并显示 BLE/GATT 信息
-./bin/puqu-ipp print-test  # 直接连接设备并打印条纹测试标签
-./bin/puqu-ipp smoke       # 检查本机蓝牙栈访问
+./bin/puqu-ipp discover    # 列出 USB 打印机及稳定序列号
+./bin/puqu-ipp print-test  # 通过 USB 打印条纹测试标签
+./bin/puqu-ipp smoke       # 检查 USB 接口访问
 ./bin/puqu-ipp service …   # 管理后台服务
 ```
 
@@ -123,23 +119,23 @@ mise run ci               # 生产构建 + 测试 + vet + 前端类型检查
 mise run sqlc             # 重新生成 internal/store/sqlitedb
 ```
 
-测试覆盖 PUQU 字节帧、BLE UUID/标志、打印取消与自动重连、配置优先级、SQLite 迁移、多打印机隔离、PWG Raster/JPEG 解码、IPP 端到端提交和管理路由。
+测试覆盖 PUQU 字节帧、USB 发现、打印取消与自动重连、配置优先级、SQLite 迁移、多打印机隔离、PWG Raster/JPEG 解码、IPP 端到端提交和管理路由。
 
 ## 协议与限制
 
-- PUQU 输出是设备自有光栅协议，不是 TSPL：8 字节打印头后跟 1bpp、MSB-first 位图。
+- PUQU USB 输出不是 TSPL：每页为 `2A 76 30 02 xL xH yL yH`，随后是 1bpp、MSB-first 位图。
 - 1 点约等于 1/203 英寸，即 8 点/mm。
 - 输入页面尺寸必须与目标打印机选择的标签规格匹配；不缩放、不裁切。
 - 单次 IPP 文档上限 16 MiB；每台打印机内存队列容量 32。
 - 当前不提供 TLS、认证、彩色、双面、PDF 或任意纸张缩放。仅在可信局域网暴露 IPP 端口。
-- 真实 macOS、Windows 和多台实体打印机仍需在目标硬件环境联调。
+- 服务端仅支持 Linux；多台实体打印机仍需在目标硬件环境联调。
 
 ## 目录
 
 ```text
 cmd/puqu-ipp/          CLI、启动配置和系统服务管理
 internal/admin/        本机管理 JSON 接口
-internal/ble/          tinygo 原生 BLE 适配
+internal/usb/          Linux usbfs 直接传输
 internal/config/       Koanf TOML/环境变量/CLI 启动配置
 internal/fleet/        多打印机运行时和驱动注册
 internal/ipp/          多队列 IPP 网关和属性

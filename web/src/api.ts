@@ -12,7 +12,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   status: () => request<Status>("/api/status"),
-  scan: () => request<{ devices: ScannedDevice[] }>("/api/bluetooth/scan", { method: "POST" }),
+  scanUSB: () => request<{ devices: ScannedDevice[] }>("/api/usb/scan", { method: "POST" }),
   saveDevice: (device: ScannedDevice) =>
     request("/api/devices", {
       method: "POST",

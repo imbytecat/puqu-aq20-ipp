@@ -21,7 +21,7 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
-type Device = sqlitedb.BleDevice
+type Device = sqlitedb.Device
 type Profile = sqlitedb.LabelProfile
 type Printer = sqlitedb.Printer
 type Job = sqlitedb.PrintJob
@@ -98,31 +98,28 @@ func Open(ctx context.Context, path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+const TransportUSB = "usb"
+
 func (s *Store) Devices(ctx context.Context) ([]*Device, error) {
 	return s.q.ListDevices(ctx)
 }
 
 type DeviceInput struct {
-	NativeID   string
-	Name       string
-	Address    string
-	WriteUUID  string
-	NotifyUUID string
+	NativeID string
+	Name     string
+	Address  string
 }
 
 func (s *Store) SaveDevice(ctx context.Context, input DeviceInput) (*Device, error) {
 	input.NativeID = strings.TrimSpace(input.NativeID)
 	input.Name = strings.TrimSpace(input.Name)
 	input.Address = strings.TrimSpace(input.Address)
-	input.WriteUUID = strings.TrimSpace(input.WriteUUID)
-	input.NotifyUUID = strings.TrimSpace(input.NotifyUUID)
-	if input.NativeID == "" || input.Name == "" || input.Address == "" || input.WriteUUID == "" {
-		return nil, errors.New("device id, name, address, and write UUID are required")
+	if input.NativeID == "" || input.Name == "" || input.Address == "" {
+		return nil, errors.New("device id, name, and address are required")
 	}
 	now := unixMillis(time.Now())
 	return s.q.UpsertDevice(ctx, sqlitedb.UpsertDeviceParams{
 		NativeID: input.NativeID, Name: input.Name, Address: input.Address,
-		WriteUuid: input.WriteUUID, NotifyUuid: nullableString(input.NotifyUUID),
 		LastSeenAt: now, UpdatedAt: now,
 	})
 }

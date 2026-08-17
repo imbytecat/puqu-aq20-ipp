@@ -2,33 +2,27 @@ package main
 
 import (
 	"fmt"
-	"strings"
-	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/imbytecat/puqu-ipp-bridge/internal/ble"
+	"github.com/imbytecat/puqu-ipp-bridge/internal/usb"
 )
 
 func smokeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "smoke",
-		Short: "Check access to the native Bluetooth stack",
-		RunE: func(_ *cobra.Command, _ []string) error {
-			devices, err := ble.Scan(6 * time.Second)
+		Short: "Check direct access to a PUQU USB printer",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			device, err := selectUSBDevice(cmd.Context(), "")
 			if err != nil {
 				return err
 			}
-			defer ble.Shutdown()
-			fmt.Printf("devices seen: %d\n", len(devices))
-			for _, device := range devices {
-				marker := ""
-				name := strings.ToUpper(device.Name)
-				if strings.Contains(name, "Q20") || strings.Contains(name, "PUQU") || strings.Contains(name, "AQ") {
-					marker = "  possible PUQU printer"
-				}
-				fmt.Printf("%s %s%s\n", device.Address, device.Name, marker)
+			conn, err := usb.Connect(usb.ConnectOptions{ID: device.ID})
+			if err != nil {
+				return err
 			}
+			defer conn.Disconnect()
+			fmt.Printf("connected: %s serial=%s address=%s\n", device.Name, device.ID, device.Address)
 			return nil
 		},
 	}

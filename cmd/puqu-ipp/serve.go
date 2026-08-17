@@ -16,7 +16,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/imbytecat/puqu-ipp-bridge/internal/admin"
-	"github.com/imbytecat/puqu-ipp-bridge/internal/ble"
 	"github.com/imbytecat/puqu-ipp-bridge/internal/config"
 	"github.com/imbytecat/puqu-ipp-bridge/internal/fleet"
 	ippserver "github.com/imbytecat/puqu-ipp-bridge/internal/ipp"
@@ -73,10 +72,7 @@ func runDaemon(ctx context.Context, runtimeConfig config.Config) error {
 	if err := printerFleet.Start(ctx); err != nil {
 		return err
 	}
-	defer func() {
-		printerFleet.Shutdown()
-		ble.Shutdown()
-	}()
+	defer printerFleet.Shutdown()
 
 	ipp := ippserver.NewGateway(st, printerFleet, logger)
 	if err := ipp.Start(ctx); err != nil {

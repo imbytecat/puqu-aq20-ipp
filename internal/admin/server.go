@@ -33,7 +33,7 @@ func New(st *store.Store, printerFleet *fleet.Fleet, ippGateway *ipp.Gateway, ru
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/status", s.status)
-	mux.HandleFunc("POST /api/bluetooth/scan", s.scan)
+	mux.HandleFunc("POST /api/usb/scan", s.scanUSB)
 	mux.HandleFunc("POST /api/devices", s.saveDevice)
 	mux.HandleFunc("DELETE /api/devices/{id}", s.deleteDevice)
 	mux.HandleFunc("POST /api/printers", s.createPrinter)
@@ -92,10 +92,10 @@ func (s *Server) snapshot(ctx context.Context) ([]*store.Printer, []*store.Devic
 	return printers, devices, profiles, jobs, err
 }
 
-func (s *Server) scan(w http.ResponseWriter, r *http.Request) {
-	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+func (s *Server) scanUSB(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
-	devices, err := s.fleet.Scan(ctx, 6*time.Second)
+	devices, err := s.fleet.ScanUSB(ctx)
 	if err != nil {
 		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
@@ -104,11 +104,9 @@ func (s *Server) scan(w http.ResponseWriter, r *http.Request) {
 }
 
 type deviceInput struct {
-	NativeID   string `json:"nativeId"`
-	Name       string `json:"name"`
-	Address    string `json:"address"`
-	WriteUUID  string `json:"writeUuid"`
-	NotifyUUID string `json:"notifyUuid"`
+	NativeID string `json:"nativeId"`
+	Name     string `json:"name"`
+	Address  string `json:"address"`
 }
 
 func (s *Server) saveDevice(w http.ResponseWriter, r *http.Request) {
@@ -116,15 +114,8 @@ func (s *Server) saveDevice(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &input) {
 		return
 	}
-	if input.WriteUUID == "" {
-		input.WriteUUID = "ae01"
-	}
-	if input.NotifyUUID == "" {
-		input.NotifyUUID = "ae02"
-	}
 	device, err := s.store.SaveDevice(r.Context(), store.DeviceInput{
 		NativeID: input.NativeID, Name: input.Name, Address: input.Address,
-		WriteUUID: input.WriteUUID, NotifyUUID: input.NotifyUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -449,14 +440,12 @@ type printerDTO struct {
 }
 
 type deviceDTO struct {
-	ID                int64   `json:"id"`
-	NativeID          string  `json:"nativeId"`
-	Name              string  `json:"name"`
-	Address           string  `json:"address"`
-	WriteUUID         string  `json:"writeUuid"`
-	NotifyUUID        *string `json:"notifyUuid"`
-	AssignedPrinterID *int64  `json:"assignedPrinterId"`
-	LastSeenAt        int64   `json:"lastSeenAt"`
+	ID                int64  `json:"id"`
+	NativeID          string `json:"nativeId"`
+	Name              string `json:"name"`
+	Address           string `json:"address"`
+	AssignedPrinterID *int64 `json:"assignedPrinterId"`
+	LastSeenAt        int64  `json:"lastSeenAt"`
 }
 
 type profileDTO struct {
@@ -522,7 +511,6 @@ func mapDevices(values []*store.Device, printers []*store.Printer) []deviceDTO {
 func toDevice(value *store.Device, assignedPrinterID *int64) deviceDTO {
 	return deviceDTO{
 		ID: value.ID, NativeID: value.NativeID, Name: value.Name, Address: value.Address,
-		WriteUUID: value.WriteUuid, NotifyUUID: nullString(value.NotifyUuid),
 		AssignedPrinterID: assignedPrinterID, LastSeenAt: value.LastSeenAt,
 	}
 }

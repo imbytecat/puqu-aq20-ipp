@@ -21,7 +21,7 @@ func TestStorePersistsPrinterDeviceAndAbortsInterruptedJobs(t *testing.T) {
 		t.Fatalf("default printers = %+v, %v", printers, err)
 	}
 	device, err := s.SaveDevice(ctx, DeviceInput{
-		NativeID: "dev-1", Name: "Q20-test", Address: "dev-1", WriteUUID: "ae01", NotifyUUID: "ae02",
+		NativeID: "dev-1", Name: "Q20-test", Address: "/dev/bus/usb/001/010",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -97,6 +97,54 @@ func TestMigrationRemovesDiscoveryColumnsWithoutLosingPrinter(t *testing.T) {
 	}
 }
 
+func TestUSBMigrationClearsBluetoothAssignmentAndRestoresItOnRollback(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite3", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "puqu.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	goose.SetBaseFS(migrations)
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, "migrations", 3); err != nil {
+		t.Fatal(err)
+	}
+	result, err := db.ExecContext(ctx, `
+		INSERT INTO ble_devices (native_id, name, address, write_uuid, notify_uuid, last_seen_at, updated_at)
+		VALUES ('ble-1', 'AQ20 BLE', 'AA:BB:CC:DD:EE:FF', 'ae01', 'ae02', 1, 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deviceID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE printers SET device_id = ?", deviceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := goose.UpTo(db, "migrations", 4); err != nil {
+		t.Fatal(err)
+	}
+	var assigned sql.NullInt64
+	if err := db.QueryRowContext(ctx, "SELECT device_id FROM printers LIMIT 1").Scan(&assigned); err != nil {
+		t.Fatal(err)
+	}
+	if assigned.Valid {
+		t.Fatalf("Bluetooth assignment survived USB cutover: %d", assigned.Int64)
+	}
+	if err := goose.DownTo(db, "migrations", 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRowContext(ctx, "SELECT device_id FROM printers LIMIT 1").Scan(&assigned); err != nil {
+		t.Fatal(err)
+	}
+	if !assigned.Valid || assigned.Int64 != deviceID {
+		t.Fatalf("rollback assignment = %+v, want %d", assigned, deviceID)
+	}
+}
+
 func TestStoreSupportsSharedProfilesAndExclusiveDevices(t *testing.T) {
 	ctx := context.Background()
 	s, err := Open(ctx, filepath.Join(t.TempDir(), "puqu.db"))
@@ -110,7 +158,7 @@ func TestStoreSupportsSharedProfilesAndExclusiveDevices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	device, err := s.SaveDevice(ctx, DeviceInput{NativeID: "dev-1", Name: "Q20", Address: "dev-1", WriteUUID: "ae01"})
+	device, err := s.SaveDevice(ctx, DeviceInput{NativeID: "dev-1", Name: "Q20", Address: "/dev/bus/usb/001/010"})
 	if err != nil {
 		t.Fatal(err)
 	}
