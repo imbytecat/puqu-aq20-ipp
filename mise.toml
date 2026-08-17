@@ -1,0 +1,90 @@
+[tools]
+go = "1.26"
+node = "24"
+pnpm = "10"
+
+[tasks.setup]
+description = "Install frontend dependencies"
+depends = ["web:install"]
+
+[tasks.dev]
+description = "Run daemon and React UI in development"
+depends = ["server:dev", "web:dev"]
+
+[tasks."web:install"]
+description = "Install React dependencies"
+dir = "web"
+run = "pnpm install --frozen-lockfile"
+
+[tasks."web:dev"]
+description = "Run Vite on :5173"
+dir = "web"
+run = "pnpm run dev"
+
+[tasks."web:build"]
+description = "Build React UI for embedding"
+dir = "web"
+run = "pnpm run build"
+
+[tasks."web:typecheck"]
+description = "Type-check React UI"
+dir = "web"
+run = "pnpm run typecheck"
+
+[tasks."server:dev"]
+description = "Run daemon with a repository-local database"
+run = "go run ./cmd/puqu-ipp --data .data/dev.db"
+
+[tasks.build]
+description = "Build embedded production binary"
+depends = ["web:build"]
+run = "mkdir -p bin && go build -tags embed -o bin/puqu-ipp ./cmd/puqu-ipp"
+
+[tasks.test]
+description = "Run Go tests"
+run = "go test ./..."
+
+[tasks.vet]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks.format]
+description = "Format Go source"
+run = "gofmt -w cmd internal"
+
+[tasks.sqlc]
+description = "Regenerate SQLite query bindings"
+run = "go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.0 generate"
+
+[tasks.discover]
+description = "Discover BLE printers and inspect GATT"
+run = "go run ./cmd/puqu-ipp discover"
+
+[tasks.print]
+description = "Print a hardware test label"
+run = "go run ./cmd/puqu-ipp print"
+
+[tasks.smoke]
+description = "Check native Bluetooth adapter access"
+run = "go run ./cmd/puqu-ipp smoke"
+
+[tasks."service:install"]
+description = "Build and install the native background service"
+depends = ["build"]
+run = "./bin/puqu-ipp service install"
+
+[tasks."service:start"]
+description = "Start the installed background service"
+run = "./bin/puqu-ipp service start"
+
+[tasks."service:stop"]
+description = "Stop the installed background service"
+run = "./bin/puqu-ipp service stop"
+
+[tasks."service:status"]
+description = "Show background service status"
+run = "./bin/puqu-ipp service status"
+
+[tasks.ci]
+description = "Build, test, vet, and type-check"
+depends = ["build", "test", "vet", "web:typecheck"]
