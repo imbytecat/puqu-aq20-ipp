@@ -4,10 +4,14 @@ package usb
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestScanFindsStableAQ20Identity(t *testing.T) {
@@ -36,6 +40,50 @@ func TestScanFindsStableAQ20Identity(t *testing.T) {
 	got := devices[0]
 	if got.ID != "4250313332393404" || got.Name != "PUQU Label Printer" || got.Address != "/dev/bus/usb/001/010" {
 		t.Fatalf("device = %+v", got)
+	}
+}
+
+func TestClaimPrinterInterfaceDetachesOnlyUsblp(t *testing.T) {
+	calls := 0
+	err := claimPrinterInterface(7, func(fd, request uintptr, data unsafe.Pointer) error {
+		calls++
+		if fd != 7 {
+			t.Fatalf("fd = %d", fd)
+		}
+		switch request {
+		case claimInterfaceRequest:
+			if iface := *(*uint32)(data); iface != interfaceNumber {
+				t.Fatalf("interface = %d", iface)
+			}
+			return unix.EBUSY
+		case disconnectClaimRequest:
+			claim := (*disconnectClaim)(data)
+			if claim.Interface != interfaceNumber || claim.Flags != disconnectClaimIfDriver || string(claim.Driver[:5]) != "usblp" {
+				t.Fatalf("disconnect claim = %+v", claim)
+			}
+			return nil
+		default:
+			t.Fatalf("unexpected ioctl request %#x", request)
+			return nil
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 {
+		t.Fatalf("calls = %d, want 2", calls)
+	}
+}
+
+func TestClaimPrinterInterfacePreservesOtherOwners(t *testing.T) {
+	err := claimPrinterInterface(7, func(_ uintptr, request uintptr, _ unsafe.Pointer) error {
+		if request == claimInterfaceRequest || request == disconnectClaimRequest {
+			return unix.EBUSY
+		}
+		return nil
+	})
+	if !errors.Is(err, unix.EBUSY) {
+		t.Fatalf("error = %v, want EBUSY", err)
 	}
 }
 

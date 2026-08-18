@@ -30,6 +30,8 @@ const (
 	bulkChunkSize   = 512
 )
 
+const disconnectClaimIfDriver = 0x01
+
 type discoveredDevice struct {
 	Device
 	path string
@@ -42,10 +44,19 @@ type bulkTransfer struct {
 	Data     uintptr
 }
 
+type disconnectClaim struct {
+	Interface uint32
+	Flags     uint32
+	Driver    [256]byte
+}
+
+type ioctlCaller func(fd, request uintptr, data unsafe.Pointer) error
+
 var (
-	claimInterface   = ioctlRequest(ioctlRead, 'U', 15, unsafe.Sizeof(uint32(0)))
-	releaseInterface = ioctlRequest(ioctlRead, 'U', 16, unsafe.Sizeof(uint32(0)))
-	bulkRequest      = ioctlRequest(ioctlRead|ioctlWrite, 'U', 2, unsafe.Sizeof(bulkTransfer{}))
+	claimInterfaceRequest   = ioctlRequest(ioctlRead, 'U', 15, unsafe.Sizeof(uint32(0)))
+	releaseInterfaceRequest = ioctlRequest(ioctlRead, 'U', 16, unsafe.Sizeof(uint32(0)))
+	disconnectClaimRequest  = ioctlRequest(ioctlRead, 'U', 27, unsafe.Sizeof(disconnectClaim{}))
+	bulkRequest             = ioctlRequest(ioctlRead|ioctlWrite, 'U', 2, unsafe.Sizeof(bulkTransfer{}))
 )
 
 const (
@@ -55,6 +66,17 @@ const (
 
 func ioctlRequest(direction, kind, number, size uintptr) uintptr {
 	return direction<<30 | size<<16 | kind<<8 | number
+}
+
+func claimPrinterInterface(fd uintptr, call ioctlCaller) error {
+	iface := uint32(interfaceNumber)
+	err := call(fd, claimInterfaceRequest, unsafe.Pointer(&iface))
+	if err == nil || !errors.Is(err, unix.EBUSY) {
+		return err
+	}
+	claim := disconnectClaim{Interface: interfaceNumber, Flags: disconnectClaimIfDriver}
+	copy(claim.Driver[:], "usblp")
+	return call(fd, disconnectClaimRequest, unsafe.Pointer(&claim))
 }
 
 func Scan(ctx context.Context) ([]Device, error) {
@@ -165,8 +187,7 @@ func Connect(opts ConnectOptions) (*Conn, error) {
 		}
 		return nil, err
 	}
-	iface := uint32(interfaceNumber)
-	if err := ioctl(file.Fd(), claimInterface, unsafe.Pointer(&iface)); err != nil {
+	if err := claimPrinterInterface(file.Fd(), ioctl); err != nil {
 		file.Close()
 		return nil, fmt.Errorf("claim USB printer interface %d: %w", interfaceNumber, err)
 	}
@@ -282,7 +303,7 @@ func (c *Conn) disconnect() {
 		c.connected.Store(false)
 		close(c.done)
 		iface := uint32(interfaceNumber)
-		_ = ioctl(c.file.Fd(), releaseInterface, unsafe.Pointer(&iface))
+		_ = ioctl(c.file.Fd(), releaseInterfaceRequest, unsafe.Pointer(&iface))
 		_ = c.file.Close()
 		c.handlerMu.Lock()
 		handlers := append([]func(){}, c.handlers...)

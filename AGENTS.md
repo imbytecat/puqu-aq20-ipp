@@ -10,7 +10,7 @@ Linux daemon exposing multiple PUQU AQ20-compatible USB label printers as direct
 - `internal/ipp/` — IPP gateway routing stable `/ipp/<slug>` paths to isolated queues. No mDNS/DNS-SD discovery.
 - `internal/raster/` — pure PWG Raster and JPEG decoding. Exact 203 dpi profile dimensions; no silent scaling.
 - `internal/printer/` — one physical printer connection, reconnect loop, serialized print/cancel flow.
-- `internal/usb/` — Linux usbfs discovery and direct bulk endpoint transport. Devices bind by stable USB serial number; connections coexist.
+- `internal/usb/` — Linux usbfs discovery and direct bulk endpoint transport. Devices bind by stable USB serial number; connections coexist. Interface claim atomically detaches only the kernel `usblp` driver and preserves other userspace owners.
 - `internal/puqu/` — pure reverse-engineered PUQU wire protocol.
 - `internal/store/` — SQLite business state through ncruces/go-sqlite3, goose, and sqlc.
 - `internal/admin/` — local JSON management interface. No IPP protocol logic.

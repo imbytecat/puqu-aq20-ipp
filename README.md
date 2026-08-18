@@ -45,7 +45,9 @@ SQLite 只保存业务状态：打印机、设备、标签规格和作业记录�
 
 ## 前置条件
 
-Linux 通过 usbfs 直接访问打印机。服务账号必须能读写 USB `8888:0026`；系统服务默认可用 root，开发运行需 sudo 或 udev 规则。IPP 客户端仍可使用 Linux、macOS 或 Windows。
+Linux 通过 usbfs 直接访问打印机。服务账号必须能读写 USB `8888:0026`；程序会在接口 2 被内核 `usblp` 占用时仅解除该驱动并原子 claim，不会抢占其他用户态进程。
+
+Docker 需挂载 `/dev/bus/usb:/dev/bus/usb`，并提供执行 `USBDEVFS_DISCONNECT_CLAIM` 所需权限（最简单为 `privileged: true`）。生产主机也可 `blacklist usblp`，避免热插拔或重启后内核重新绑定。
 
 开发工具由 [mise](https://mise.jdx.dev/) 固定：Go 1.26、Node 24、pnpm 10。
 
